@@ -18,7 +18,8 @@ import (
 )
 
 // getLocalIP 获取本地 IP 地址
-func getLocalIP() (net.IP, error) {
+func getLocalIP() ([]net.IP, error) {
+	ips := make([]net.IP, 0)
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -34,61 +35,65 @@ func getLocalIP() (net.IP, error) {
 			switch v := addr.(type) {
 			case *net.IPNet:
 				if v.IP.To4() != nil && !v.IP.IsLoopback() {
-					return v.IP, nil
+					ips = append(ips, v.IP)
 				}
 			}
 		}
 	}
-
-	return nil, fmt.Errorf("no valid local IP address found")
+	return ips, nil
 }
 
 // pingScan 使用 ICMP ping 扫描局域网内的所有活动设备
 func pingScan() ([]string, error) {
 	var ips []string
-	ip, err := getLocalIP()
+	ipGroup, err := getLocalIP()
+	//fmt.Println(ip)
 	if err != nil {
 		return nil, err
 	}
+	for _, i := range ipGroup {
+		ip := i.Mask(net.IPv4Mask(255, 255, 255, 0)) // 假设是 24 子网掩码
+		ip4 := ip.To4()
+		if ip4 == nil {
+			return nil, fmt.Errorf("invalid IPv4 address")
+		}
 
-	ip = ip.Mask(net.IPv4Mask(255, 255, 255, 0)) // 假设是 24 子网掩码
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return nil, fmt.Errorf("invalid IPv4 address")
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+
+		for i := 1; i < 255; i++ {
+			ip4[3] = byte(i)
+			targetIP := ip4.String()
+
+			wg.Add(1)
+			go func(ip string) {
+				defer wg.Done()
+				pinger, err := probing.NewPinger(ip)
+				if err != nil {
+					fmt.Println("Failed to create pinger:", err)
+					return
+				}
+				pinger.SetPrivileged(true)
+				pinger.Count = 1
+				pinger.Timeout = time.Second * 1
+
+				pinger.OnRecv = func(pkt *probing.Packet) {
+					mu.Lock()
+					ips = append(ips, ip)
+					mu.Unlock()
+				}
+				err = pinger.Run()
+				if err != nil {
+					//忽视发送ping失败
+					return
+					//fmt.Println("Failed to run pinger:", err)
+				}
+			}(targetIP)
+		}
+
+		wg.Wait()
 	}
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	for i := 1; i < 255; i++ {
-		ip4[3] = byte(i)
-		targetIP := ip4.String()
-
-		wg.Add(1)
-		go func(ip string) {
-			defer wg.Done()
-			pinger, err := probing.NewPinger(ip)
-			if err != nil {
-				fmt.Println("Failed to create pinger:", err)
-				return
-			}
-			pinger.SetPrivileged(true)
-			pinger.Count = 1
-			pinger.Timeout = time.Second * 1
-
-			pinger.OnRecv = func(pkt *probing.Packet) {
-				mu.Lock()
-				ips = append(ips, ip)
-				mu.Unlock()
-			}
-			err = pinger.Run()
-			if err != nil {
-				fmt.Println("Failed to run pinger:", err)
-			}
-		}(targetIP)
-	}
-
-	wg.Wait()
+	fmt.Println(ips)
 	return ips, nil
 }
 
