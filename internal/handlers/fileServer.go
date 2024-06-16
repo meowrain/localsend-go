@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"html/template"
+	"localsend_cli/templates"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ func IndexFileHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		tmpl := template.Must(template.ParseFiles("templates/cloudstorage.html"))
+		tmpl := template.Must(template.ParseFS(templates.EmbeddedFiles, "cloudstorage.html"))
 		data := struct {
 			Path  string
 			Files []os.DirEntry

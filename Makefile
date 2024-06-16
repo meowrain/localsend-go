@@ -2,7 +2,7 @@
 PROJECT_NAME := localsend_cli
 
 # 源代码目录
-SRC_DIR := .
+SRC_DIR := ./cmd
 
 # 输出目录
 OUT_DIR := ./bin

@@ -1,5 +1,5 @@
 name: "Server"
 
 functions:
-  http_file_server: false
+  http_file_server: true
   local_send_server: true
