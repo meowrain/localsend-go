@@ -93,26 +93,15 @@ func pingScan() ([]string, error) {
 
 		wg.Wait()
 	}
-	fmt.Println(ips)
+	// fmt.Println(ips)
 	return ips, nil
 }
 
 // StartHTTPBroadcast 向局域网内的所有 IP 发送 HTTP 请求
 func StartHTTPBroadcast() {
-	message := BroadcastMessage{
-		Alias:       "Server",
-		Version:     "2.0",
-		DeviceModel: "Linux",
-		DeviceType:  "desktop",
-		Fingerprint: "random-string",
-		Port:        53317,
-		Protocol:    "http",
-		Download:    true,
-		Announce:    true,
-	}
 
 	for {
-		data, err := json.Marshal(message)
+		data, err := json.Marshal(shared.Messsage)
 		// fmt.Println(string(data))
 		if err != nil {
 			panic(err)

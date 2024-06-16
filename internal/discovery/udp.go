@@ -17,18 +17,7 @@ func StartBroadcast() {
 		Port: 53317,
 	}
 
-	message := BroadcastMessage{
-		Alias:       "Server",
-		Version:     "2.0",
-		DeviceModel: "Linux",
-		DeviceType:  "desktop",
-		Fingerprint: "random-string",
-		Port:        53317,
-		Protocol:    "http",
-		Download:    true,
-		Announce:    true,
-	}
-	data, err := json.Marshal(message)
+	data, err := json.Marshal(shared.Messsage)
 	if err != nil {
 		panic(err)
 	}
