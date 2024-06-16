@@ -22,17 +22,15 @@ type DeviceInfo struct {
 	Protocol    string `json:"protocol"`
 	Download    bool   `json:"download"`
 }
-
 type FileInfo struct {
 	ID       string `json:"id"`
 	FileName string `json:"fileName"`
 	Size     int64  `json:"size"`
 	FileType string `json:"fileType"`
-	Sha256   string `json:"sha256,omitempty"`
+	SHA256   string `json:"sha256,omitempty"`
 	Preview  string `json:"preview,omitempty"`
 }
-
-type PrepareUploadRequest struct {
+type PrepareReceiveRequest struct {
 	Info struct {
 		Alias       string `json:"alias"`
 		Version     string `json:"version"`
@@ -46,7 +44,7 @@ type PrepareUploadRequest struct {
 	Files map[string]FileInfo `json:"files"`
 }
 
-type PrepareUploadResponse struct {
+type PrepareReceiveResponse struct {
 	SessionID string            `json:"sessionId"`
 	Files     map[string]string `json:"files"` // File ID to Token map
 }

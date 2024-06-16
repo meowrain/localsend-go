@@ -24,8 +24,11 @@ func main() {
 
 	// 启动HTTP服务器
 	httpServer := server.New()
-	httpServer.HandleFunc("/upload", handlers.SendHandler)      // 上传处理程序
-	httpServer.HandleFunc("/download", handlers.ReceiveHandler) // 下载处理程序
+	httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
+	httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
+	httpServer.HandleFunc("/send", handlers.SendHandler)             // 上传处理程序
+	httpServer.HandleFunc("/receive", handlers.NormalReceiveHandler) // 下载处理程序
+	httpServer.Handle("/", http.FileServer(http.Dir("static")))
 	go func() {
 		log.Println("Server started at :53317")
 		if err := http.ListenAndServe(":53317", httpServer); err != nil {

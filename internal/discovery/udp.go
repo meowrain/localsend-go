@@ -24,7 +24,7 @@ func StartBroadcast() {
 		DeviceType:  "desktop",
 		Fingerprint: "random-string",
 		Port:        53317,
-		Protocol:    "https",
+		Protocol:    "http",
 		Download:    true,
 		Announce:    true,
 	}
@@ -50,7 +50,8 @@ func StartBroadcast() {
 			panic(err)
 		}
 		// fmt.Println(num, "bytes write to multicastAddr")
-		fmt.Println("UDP Broadcast message sent!")
+		//log
+		// fmt.Println("UDP Broadcast message sent!")
 		time.Sleep(5 * time.Second) // 每5秒发送一次广播消息
 	}
 }

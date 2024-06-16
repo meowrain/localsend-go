@@ -72,6 +72,7 @@ func pingScan() ([]string, error) {
 				fmt.Println("Failed to create pinger:", err)
 				return
 			}
+			pinger.SetPrivileged(true)
 			pinger.Count = 1
 			pinger.Timeout = time.Second * 1
 
@@ -100,7 +101,7 @@ func StartHTTPBroadcast() {
 		DeviceType:  "desktop",
 		Fingerprint: "random-string",
 		Port:        53317,
-		Protocol:    "https",
+		Protocol:    "http",
 		Download:    true,
 		Announce:    true,
 	}
@@ -129,7 +130,8 @@ func StartHTTPBroadcast() {
 		}
 
 		wg.Wait()
-		fmt.Println("HTTP broadcast messages sent!")
+		// log
+		// fmt.Println("HTTP broadcast messages sent!")
 		time.Sleep(5 * time.Second) // 每5秒发送一次HTTP广播消息
 	}
 }
