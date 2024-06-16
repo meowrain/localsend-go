@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uploads</title>
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>Uploads</h1>
+        <ul>
+            {{range .Files}}
+                <li>
+                    {{if .IsDir}}
+                        <a href="{{$.Path}}{{.Name}}/">{{.Name}}/</a>
+                    {{else}}
+                        <a href="{{$.Path}}{{.Name}}">{{.Name}}</a>
+                    {{end}}
+                </li>
+            {{end}}
+        </ul>
+    </div>
+</body>
+</html>

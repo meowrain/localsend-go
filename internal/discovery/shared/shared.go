@@ -12,7 +12,7 @@ import (
 var DiscoveredDevices = make(map[string]BroadcastMessage)
 var Mu sync.Mutex
 var Messsage BroadcastMessage = BroadcastMessage{
-	Alias:       config.NameOfDevice,
+	Alias:       config.ConfigData.NameOfDevice,
 	Version:     "2.0",
 	DeviceModel: utils.CheckOSType(),
 	DeviceType:  "desktop",

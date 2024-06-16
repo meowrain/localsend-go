@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 )
 
-const uploadDir = "uploads"
-
 // SendHandler 处理文件上传请求
 func SendHandler(w http.ResponseWriter, r *http.Request) {
 	// 解析multipart/form-data
