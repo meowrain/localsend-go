@@ -1,7 +1,8 @@
 # LocalSend CLI
 
-LocalSend CLI
-
+<p align="center">
+  <img src="doc/images/image.png" alt="LocalSend CLI logo">
+</p>
 
 ## 安装
 
@@ -35,7 +36,8 @@ make build
 ```
 
 根据你的操作系统和架构选择相应的二进制文件运行。
-
+Linux下需要执行这个命令，启用其ping功能
+`sudo setcap cap_net_raw=+ep localsend_cli`
 ### 功能
 
 
