@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
 	"localsend_cli/internal/config"
@@ -11,6 +12,11 @@ import (
 	"net/http"
 	"os"
 )
+
+//go:embed static/*
+//go:embed templates/*
+//go:embed config.yaml
+var EmbeddedFiles embed.FS
 
 func main() {
 	mode := flag.String("mode", "send", "Mode of operation: send or receive")
