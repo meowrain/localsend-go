@@ -11,11 +11,13 @@ import (
 
 var DiscoveredDevices = make(map[string]BroadcastMessage)
 var Mu sync.Mutex
+
+// https://github.com/localsend/protocol?tab=readme-ov-file#71-device-type
 var Messsage BroadcastMessage = BroadcastMessage{
 	Alias:       config.ConfigData.NameOfDevice,
 	Version:     "2.0",
 	DeviceModel: utils.CheckOSType(),
-	DeviceType:  "desktop",
+	DeviceType:  "headless", // 表示是没有gui的情况下运行
 	Fingerprint: "random-string",
 	Port:        53317,
 	Protocol:    "http",

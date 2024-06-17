@@ -30,17 +30,18 @@ type FileInfo struct {
 	SHA256   string `json:"sha256,omitempty"`
 	Preview  string `json:"preview,omitempty"`
 }
+type Info struct {
+	Alias       string `json:"alias"`
+	Version     string `json:"version"`
+	DeviceModel string `json:"deviceModel,omitempty"`
+	DeviceType  string `json:"deviceType,omitempty"`
+	Fingerprint string `json:"fingerprint"`
+	Port        int    `json:"port"`
+	Protocol    string `json:"protocol"`
+	Download    bool   `json:"download"`
+}
 type PrepareReceiveRequest struct {
-	Info struct {
-		Alias       string `json:"alias"`
-		Version     string `json:"version"`
-		DeviceModel string `json:"deviceModel,omitempty"`
-		DeviceType  string `json:"deviceType,omitempty"`
-		Fingerprint string `json:"fingerprint"`
-		Port        int    `json:"port"`
-		Protocol    string `json:"protocol"`
-		Download    bool   `json:"download"`
-	} `json:"info"`
+	Info  Info                `json:"info"`
 	Files map[string]FileInfo `json:"files"`
 }
 

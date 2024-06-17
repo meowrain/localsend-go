@@ -38,7 +38,8 @@ func main() {
 
 		httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
 		httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
-		httpServer.HandleFunc("/send", handlers.SendHandler)             // 上传处理程序
+		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
+		httpServer.HandleFunc("/send", handlers.NormalSendHandler)       // 上传处理程序
 		httpServer.HandleFunc("/receive", handlers.NormalReceiveHandler) // 下载处理程序
 
 	}
@@ -61,9 +62,13 @@ func main() {
 			flag.Usage()
 			os.Exit(1)
 		}
-		if err := sendFile(*filePath); err != nil {
+		err := handlers.SendFile(*toDevice, *filePath)
+		if err != nil {
 			log.Fatalf("Send failed: %v", err)
 		}
+		// if err := sendFile(*filePath); err != nil {
+		// 	log.Fatalf("Send failed: %v", err)
+		// }
 	case "receive":
 		fmt.Println("Waiting to receive files...")
 		select {} // 阻塞程序等待接收文件
