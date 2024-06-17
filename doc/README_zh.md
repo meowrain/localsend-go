@@ -1,13 +1,10 @@
-
 <div align="center">
 <h1>LocalSend CLI</h1>
-  <img src="doc/images/image.png" alt="LocalSend CLI logo" width="150" height="150">
-  <p>✨LocalSend CLI✨</p>
+  <img src="images/image.png" alt="LocalSend CLI logo" width="150" height="150">
+  <p>✨LocalSend-cli✨</p>
 </div>
 
-## 文档
 
-[中文](doc/README_zh.md) | [英文](doc/README_en.md)
 
 ## 安装
 
@@ -60,13 +57,15 @@ example:
 .\localsend_cli-windows-amd64.exe -mode send -file ./hello.tar.gz -to 192.168.3.199
 ```
 
+
+
 ## 贡献
 
 欢迎提交 issue 和 pull request 来帮助改进这个项目。
 
 ## 许可证
 
-<!-- [MIT](LICENSE) -->
+[MIT](LICENSE)
 
 # Todo
 
