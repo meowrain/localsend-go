@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"localsend_cli/internal/models"
+	"localsend_cli/internal/utils"
 )
 
 var (
@@ -54,6 +55,7 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
+
 func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.URL.Query().Get("sessionId")
 	fileID := r.URL.Query().Get("fileId")
@@ -114,7 +116,6 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("Saved file:", filePath)
 	w.WriteHeader(http.StatusOK)
-
 }
 
 // ReceiveHandler 处理文件下载请求

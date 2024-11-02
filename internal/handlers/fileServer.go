@@ -2,11 +2,12 @@ package handlers
 
 import (
 	"html/template"
-	"localsend_cli/templates"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"localsend_cli/templates"
 )
 
 const uploadDir = "./uploads"

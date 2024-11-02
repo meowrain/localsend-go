@@ -14,6 +14,7 @@ import (
 func CheckOSType() string {
 	return runtime.GOOS
 }
+
 func WriteToClipBoard(text string) {
 	err := clipboard.WriteAll(text)
 	if err != nil {

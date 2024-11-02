@@ -3,8 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"localsend_cli/internal/discovery/shared"
 	"net/http"
+
+	"localsend_cli/internal/discovery/shared"
 )
 
 func GetInfoHandler(w http.ResponseWriter, r *http.Request) {

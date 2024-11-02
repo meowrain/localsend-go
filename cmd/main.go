@@ -3,14 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+
 	"localsend_cli/internal/config"
 	"localsend_cli/internal/discovery"
 	"localsend_cli/internal/handlers"
 	"localsend_cli/internal/pkg/server"
 	"localsend_cli/static"
-	"log"
-	"net/http"
-	"os"
 )
 
 func main() {
@@ -28,7 +29,7 @@ func main() {
 	httpServer := server.New()
 	if config.ConfigData.Functions.HttpFileServer {
 
-		//如果启用http文件服务器，启用下面的路由
+		// 如果启用http文件服务器，启用下面的路由
 		httpServer.HandleFunc("/", handlers.IndexFileHandler)
 		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
 		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))

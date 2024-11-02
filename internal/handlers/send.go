@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"localsend_cli/internal/discovery/shared"
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
+
+	"localsend_cli/internal/discovery/shared"
+	"localsend_cli/internal/models"
+	"localsend_cli/internal/utils"
 )
 
 // SendFileToOtherDevicePrepare 函数
