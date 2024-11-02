@@ -14,12 +14,13 @@ import (
 
 	"localsend_cli/internal/discovery/shared"
 	. "localsend_cli/internal/models"
+	"localsend_cli/internal/utils/logger"
 
 	probing "github.com/prometheus-community/pro-bing"
 )
 
 // getLocalIP 获取本地 IP 地址
-func getLocalIP() ([]net.IP, error) {
+func GetLocalIP() ([]net.IP, error) {
 	ips := make([]net.IP, 0)
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -47,8 +48,7 @@ func getLocalIP() ([]net.IP, error) {
 // pingScan 使用 ICMP ping 扫描局域网内的所有活动设备
 func pingScan() ([]string, error) {
 	var ips []string
-	ipGroup, err := getLocalIP()
-	// fmt.Println(ip)
+	ipGroup, err := GetLocalIP()
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +71,7 @@ func pingScan() ([]string, error) {
 				defer wg.Done()
 				pinger, err := probing.NewPinger(ip)
 				if err != nil {
-					fmt.Println("Failed to create pinger:", err)
+					logger.Errorf("Failed to create pinger:", err)
 					return
 				}
 				pinger.SetPrivileged(true)
@@ -87,29 +87,26 @@ func pingScan() ([]string, error) {
 				if err != nil {
 					// 忽视发送ping失败
 					return
-					// fmt.Println("Failed to run pinger:", err)
 				}
 			}(targetIP)
 		}
 
 		wg.Wait()
 	}
-	// fmt.Println(ips)
 	return ips, nil
 }
 
 // StartHTTPBroadcast 向局域网内的所有 IP 发送 HTTP 请求
 func StartHTTPBroadcast() {
 	for {
-		data, err := json.Marshal(shared.Messsage)
-		// fmt.Println(string(data))
+		data, err := json.Marshal(shared.Message)
 		if err != nil {
 			panic(err)
 		}
 
 		ips, err := pingScan()
 		if err != nil {
-			fmt.Println("Failed to discover devices via ping scan:", err)
+			logger.Errorf("Failed to discover devices via ping scan:", err)
 			return
 		}
 
@@ -124,8 +121,6 @@ func StartHTTPBroadcast() {
 		}
 
 		wg.Wait()
-		// log
-		// fmt.Println("HTTP broadcast messages sent!")
 		time.Sleep(5 * time.Second) // 每5秒发送一次HTTP广播消息
 	}
 }
@@ -135,7 +130,7 @@ func sendHTTPRequest(ctx context.Context, ip string, data []byte) {
 	url := fmt.Sprintf("https://%s:53317/api/localsend/v2/register", ip)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(data))
 	if err != nil {
-		fmt.Println("Failed to create HTTP request:", err)
+		logger.Errorf("Failed to create HTTP request:", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -157,20 +152,19 @@ func sendHTTPRequest(ctx context.Context, ip string, data []byte) {
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Failed to read HTTP response body:", err)
+		logger.Errorf("Failed to read HTTP response body:", err)
 		return
 	}
 	var response BroadcastMessage
 	err = json.Unmarshal(body, &response)
 	if err != nil {
-		fmt.Printf("Failed to parse HTTP response from %s: %v\n", ip, err)
+		logger.Errorf("Failed to parse HTTP response from %s: %v\n", ip, err)
 		return
 	}
 	shared.Mu.Lock()
 	if _, exists := shared.DiscoveredDevices[ip]; !exists {
 		shared.DiscoveredDevices[ip] = response
-		fmt.Printf("Discovered device: %s (%s) at %s\n", response.Alias, response.DeviceModel, ip)
+		logger.Infof("Discovered device: %s (%s) at %s\n", response.Alias, response.DeviceModel, ip)
 	}
 	shared.Mu.Unlock()
-	// fmt.Printf("Discovered device: %s (%s) at %s\n", response.Alias, response.DeviceModel, ip)
 }

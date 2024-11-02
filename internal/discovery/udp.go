@@ -2,12 +2,12 @@ package discovery
 
 import (
 	"encoding/json"
-	"fmt"
 	"net"
 	"time"
 
 	"localsend_cli/internal/discovery/shared"
 	. "localsend_cli/internal/models"
+	"localsend_cli/internal/utils/logger"
 )
 
 // StartBroadcast 发送广播消息
@@ -18,7 +18,7 @@ func StartBroadcast() {
 		Port: 53317,
 	}
 
-	data, err := json.Marshal(shared.Messsage)
+	data, err := json.Marshal(shared.Message)
 	if err != nil {
 		panic(err)
 	}
@@ -29,26 +29,24 @@ func StartBroadcast() {
 	}
 	conn, err := net.ListenUDP("udp", localAddr)
 	if err != nil {
-		fmt.Println("Error creating UDP connection:", err)
+		logger.Errorf("Error creating UDP connection:", err)
 		return
 	}
 	defer conn.Close()
 	for {
 		_, err := conn.WriteToUDP(data, multicastAddr)
 		if err != nil {
-			fmt.Println("Failed to send message:", err)
+			logger.Errorf("Failed to send message:", err)
 			panic(err)
 		}
-		// fmt.Println(num, "bytes write to multicastAddr")
-		// log
-		// fmt.Println("UDP Broadcast message sent!")
+
 		time.Sleep(5 * time.Second) // 每5秒发送一次广播消息
 	}
 }
 
 // ListenForBroadcasts 监听UDP广播消息
 func ListenForBroadcasts() {
-	fmt.Println("Listening for broadcasts...")
+	logger.Info("Listening for broadcasts...")
 
 	// 设置多播地址和端口
 	multicastAddr := &net.UDPAddr{
@@ -75,14 +73,14 @@ func ListenForBroadcasts() {
 		var message BroadcastMessage
 		err = json.Unmarshal(buf[:n], &message)
 		if err != nil {
-			fmt.Println("Failed to unmarshal broadcast message:", err)
+			logger.Errorf("Failed to unmarshal broadcast message:", err)
 			continue
 		}
 
 		shared.Mu.Lock()
 		if _, exists := shared.DiscoveredDevices[remoteAddr.IP.String()]; !exists {
 			shared.DiscoveredDevices[remoteAddr.IP.String()] = message
-			fmt.Printf("Discovered device: %s (%s) at %s\n", message.Alias, message.DeviceModel, remoteAddr.IP.String())
+			logger.Infof("Discovered device: %s (%s) at %s\n", message.Alias, message.DeviceModel, remoteAddr.IP.String())
 		}
 		shared.Mu.Unlock()
 	}

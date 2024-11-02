@@ -16,7 +16,7 @@ var (
 )
 
 // https://github.com/localsend/protocol?tab=readme-ov-file#71-device-type
-var Messsage BroadcastMessage = BroadcastMessage{
+var Message BroadcastMessage = BroadcastMessage{
 	Alias:       config.ConfigData.NameOfDevice,
 	Version:     "2.0",
 	DeviceModel: utils.CheckOSType(),

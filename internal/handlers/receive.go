@@ -11,7 +11,8 @@ import (
 	"sync"
 
 	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils"
+	"localsend_cli/internal/utils/clipboard"
+	"localsend_cli/internal/utils/logger"
 )
 
 var (
@@ -27,7 +28,8 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	fmt.Println("Received request:", req)
+
+	logger.Infof("Received request from %s,device is %s", req.Info.Alias, req.Info.DeviceModel)
 
 	sessionMutex.Lock()
 	sessionIDCounter++
@@ -43,8 +45,8 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 		fileNames[fileID] = fileInfo.FileName
 
 		if strings.HasSuffix(fileInfo.FileName, ".txt") {
-			fmt.Println("TXT file content preview:", string(fileInfo.Preview))
-			utils.WriteToClipBoard(fileInfo.Preview)
+			logger.Success("TXT file content preview:", string(fileInfo.Preview))
+			clipboard.WriteToClipBoard(fileInfo.Preview)
 		}
 	}
 
@@ -81,14 +83,14 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	err := os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
 		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
-		fmt.Println("Error creating directory:", err)
+		logger.Errorf("Error creating directory:", err)
 		return
 	}
 	// 创建文件
 	file, err := os.Create(filePath)
 	if err != nil {
 		http.Error(w, "Failed to create file", http.StatusInternalServerError)
-		fmt.Println("Error creating file:", err)
+		logger.Errorf("Error creating file:", err)
 		return
 	}
 	defer file.Close()
@@ -98,7 +100,7 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		n, err := r.Body.Read(buffer)
 		if err != nil && err != io.EOF {
 			http.Error(w, "Failed to read file", http.StatusInternalServerError)
-			fmt.Println("Error reading file:", err)
+			logger.Errorf("Error reading file:", err)
 			return
 		}
 		if n == 0 {
@@ -108,13 +110,13 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		_, err = file.Write(buffer[:n])
 		if err != nil {
 			http.Error(w, "Failed to write file", http.StatusInternalServerError)
-			fmt.Println("Error writing file:", err)
+			logger.Failedf("Failed to write file:", err)
 			return
 
 		}
 	}
 
-	fmt.Println("Saved file:", filePath)
+	logger.Success("Saved file to:", filePath)
 	w.WriteHeader(http.StatusOK)
 }
 

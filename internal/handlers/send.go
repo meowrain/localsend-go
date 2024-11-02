@@ -13,7 +13,8 @@ import (
 
 	"localsend_cli/internal/discovery/shared"
 	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils"
+	"localsend_cli/internal/utils/logger"
+	"localsend_cli/internal/utils/sha256"
 )
 
 // SendFileToOtherDevicePrepare 函数
@@ -25,7 +26,7 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 			return err
 		}
 		if !info.IsDir() {
-			sha256Hash, err := utils.CalculateSHA256(filePath)
+			sha256Hash, err := sha256.CalculateSHA256(filePath)
 			if err != nil {
 				return fmt.Errorf("error calculating SHA256 hash: %w", err)
 			}
@@ -47,14 +48,14 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 	// 创建并填充 PrepareReceiveRequest 结构体
 	request := models.PrepareReceiveRequest{
 		Info: models.Info{
-			Alias:       shared.Messsage.Alias,
-			Version:     shared.Messsage.Version,
-			DeviceModel: shared.Messsage.DeviceModel,
-			DeviceType:  shared.Messsage.DeviceType,
-			Fingerprint: shared.Messsage.Fingerprint,
-			Port:        shared.Messsage.Port,
-			Protocol:    shared.Messsage.Protocol,
-			Download:    shared.Messsage.Download,
+			Alias:       shared.Message.Alias,
+			Version:     shared.Message.Version,
+			DeviceModel: shared.Message.DeviceModel,
+			DeviceType:  shared.Message.DeviceType,
+			Fingerprint: shared.Message.Fingerprint,
+			Port:        shared.Message.Port,
+			Protocol:    shared.Message.Protocol,
+			Download:    shared.Message.Download,
 		},
 		Files: files,
 	}
@@ -156,14 +157,14 @@ func uploadFile(ip, sessionId, fileId, token, filePath string) error {
 		return fmt.Errorf("file upload failed: received status code %d", resp.StatusCode)
 	}
 
-	fmt.Println("File uploaded successfully")
+	logger.Success("File uploaded successfully")
 	return nil
 }
 
 // SendFile 函数
 func SendFile(ip string, path string) error {
 	response, err := SendFileToOtherDevicePrepare(ip, path)
-	fmt.Println("response:", response)
+	logger.Infof("response:", response)
 	if err != nil {
 		return err
 	}
