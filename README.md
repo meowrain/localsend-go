@@ -11,6 +11,13 @@
 
 ## 安装
 
+### Arch Linux
+
+```bash
+yay -Syy
+yay -S localsend-go
+```
+
 > 😊可以下载Release中的可执行文件,找到你对应的平台即可
 
 ### 先决条件
