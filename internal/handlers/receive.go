@@ -22,6 +22,7 @@ var (
 )
 
 func PrepareReceive(w http.ResponseWriter, r *http.Request) {
+
 	var req models.PrepareReceiveRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
@@ -59,6 +60,7 @@ func PrepareReceive(w http.ResponseWriter, r *http.Request) {
 }
 
 func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
+
 	sessionID := r.URL.Query().Get("sessionId")
 	fileID := r.URL.Query().Get("fileId")
 	token := r.URL.Query().Get("token")

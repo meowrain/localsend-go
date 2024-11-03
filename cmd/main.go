@@ -20,13 +20,7 @@ func main() {
 	logger.InitLogger()
 	mode := flag.String("mode", "send", "Mode of operation: send or receive")
 	filePath := flag.String("file", "", "Path to the file to upload")
-	toDevice := flag.String("to", "", "Send file to Device ip,Write device receiver ip here")
 	flag.Parse()
-
-	// Start broadcast and listening functionality
-	go discovery.ListenForBroadcasts()
-	go discovery.StartBroadcast()
-	go discovery.StartHTTPBroadcast() // Start HTTP broadcast
 
 	// Start HTTP server
 	httpServer := server.New()
@@ -59,17 +53,14 @@ func main() {
 			flag.Usage()
 			os.Exit(1)
 		}
-		if *toDevice == "" {
-			fmt.Println("Send mode requires a toDevice")
-			flag.Usage()
-			os.Exit(1)
-		}
-		err := handlers.SendFile(*toDevice, *filePath)
+
+		err := handlers.SendFile(*filePath)
 		if err != nil {
 			logger.Errorf("Send failed: %v", err)
 		}
 
 	case "receive":
+		discovery.ListenAndStartBroadcasts(nil)
 		logger.Info("Waiting to receive files...")
 		ips, _ := discovery.GetLocalIP()
 		local_ips := make([]string, 0)

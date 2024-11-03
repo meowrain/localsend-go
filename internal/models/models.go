@@ -97,3 +97,9 @@ type PrepareReceiveResponse struct {
 	SessionID string            `json:"sessionId"`
 	Files     map[string]string `json:"files"` // File ID to Token map
 }
+
+// 假设 SendModel 已定义如下
+type SendModel struct {
+	DeviceName string
+	IP         string
+}

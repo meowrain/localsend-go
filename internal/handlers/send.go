@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"localsend_cli/internal/discovery"
 	"localsend_cli/internal/discovery/shared"
 	"localsend_cli/internal/models"
+	"localsend_cli/internal/tui"
 	"localsend_cli/internal/utils/logger"
 	"localsend_cli/internal/utils/sha256"
 )
@@ -162,13 +164,19 @@ func uploadFile(ip, sessionId, fileId, token, filePath string) error {
 }
 
 // SendFile 函数
-func SendFile(ip string, path string) error {
-	response, err := SendFileToOtherDevicePrepare(ip, path)
-	logger.Infof("response:", response)
+func SendFile(path string) error {
+	updates := make(chan []models.SendModel)
+	discovery.ListenAndStartBroadcasts(updates)
+	fmt.Println("Please select a device you want to send file to:")
+	ip, err := tui.SelectDevice(updates)
 	if err != nil {
 		return err
 	}
-
+	response, err := SendFileToOtherDevicePrepare(ip, path)
+	if err != nil {
+		return err
+	}
+	// logger.Info("response:", response)
 	// 遍历目录和子文件
 	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
