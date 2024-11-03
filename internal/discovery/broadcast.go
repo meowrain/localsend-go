@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"localsend_cli/internal/discovery/shared"
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils/logger"
 	"net"
 	"net/http"
 	"sync"
 	"time"
+
+	"localsend_cli/internal/discovery/shared"
+	"localsend_cli/internal/models"
+	"localsend_cli/internal/utils/logger"
 )
 
 func ListenAndStartBroadcasts(updates chan<- []models.SendModel) {
@@ -25,7 +26,6 @@ func ListenAndStartBroadcasts(updates chan<- []models.SendModel) {
 
 // ListenForHttpBroadCast 向局域网内的所有 IP 发送 HTTP 请求
 func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
-
 	for {
 		data, err := json.Marshal(shared.Message)
 		if err != nil {
@@ -101,7 +101,6 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 }
 
 func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {
-
 	multicastAddr := &net.UDPAddr{
 		IP:   net.ParseIP("224.0.0.167"),
 		Port: 53317,

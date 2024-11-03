@@ -2,10 +2,11 @@ package discovery
 
 import (
 	"fmt"
-	"localsend_cli/internal/utils/logger"
 	"net"
 	"sync"
 	"time"
+
+	"localsend_cli/internal/utils/logger"
 
 	probing "github.com/prometheus-community/pro-bing"
 )

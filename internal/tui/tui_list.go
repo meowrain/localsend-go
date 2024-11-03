@@ -20,7 +20,6 @@ func SelectDevice(updates <-chan []models.SendModel) (string, error) {
 	cmd := bubbletea.NewProgram(initModel)
 	// 运行 Bubble Tea 程序
 	m, err := cmd.Run()
-
 	if err != nil {
 		return "", err
 	}
