@@ -7,7 +7,7 @@
 
 ## 文档 | Document
 
-[中文](doc/README_zh.md) | [EN](doc/README_en.md) | [日本語](doc/README_ja.md)
+[中文](doc/README_zh.md) | [EN](doc/README_en.md) | [日本語](doc/README_jp.md)
 
 ## 安装
 
