@@ -1,17 +1,17 @@
 
 <div align="center">
 <h1>LocalSend CLI</h1>
-  <img src="doc/images/image.png" alt="LocalSend CLI logo" width="150" height="150">
+  <img src="doc/images/logo.png" alt="LocalSend CLI logo" width="150" height="150">
   <p>✨LocalSend CLI✨</p>
 </div>
 
-## 文档
+## 文档 | Document
 
-[中文](doc/README_zh.md) | [英文](doc/README_en.md)
+[中文](doc/README_zh.md) | [EN](doc/README_en.md) | [日本語](doc/README_ja.md)
 
 ## 安装
 
-> 😊可以下载Release中的可执行文件
+> 😊可以下载Release中的可执行文件,找到你对应的平台即可
 
 ### 先决条件
 
@@ -36,6 +36,10 @@ make build
 
 ## 使用
 
+### 使用帮助
+
+![使用帮助](doc/images/image-1.png)
+
 ### 运行程序
 
 #### 接收模式
@@ -44,6 +48,9 @@ make build
 .\localsend_cli-windows-amd64.exe -mode receive
 ```
 
+![alt text](doc/images/image-2.png)
+
+
 根据你的操作系统和架构选择相应的二进制文件运行。
 Linux下需要执行这个命令，启用其ping功能
 `sudo setcap cap_net_raw=+ep localsend_cli`
@@ -51,14 +58,19 @@ Linux下需要执行这个命令，启用其ping功能
 #### 发送模式
 
 ```
-.\localsend_cli-windows-amd64.exe -mode send -file ./xxxx.xx -to your_ip
+.\localsend_cli-windows-amd64.exe -mode send -file ./xxxx.xx
 ```
 
-example:
+例子:
 
 ```
-.\localsend_cli-windows-amd64.exe -mode send -file ./hello.tar.gz -to 192.168.3.199
+.\localsend_cli-windows-amd64.exe -mode send -file ./hello.tar.gz
 ```
+
+![alt text](doc/images/image-3.png)
+![alt text](doc/images/image-4.png)
+
+> 你可以使用j,k或者上下按键进行上下移动，q退出，enter确认
 
 ## 贡献
 
@@ -66,9 +78,10 @@ example:
 
 ## 许可证
 
-<!-- [MIT](LICENSE) -->
+[MIT](LICENSE)
 
 # Todo
 
-- [ ] 发送功能完善 发送文字可以在设备上直接显示
-
+- [x] 发送功能完善 发送文字可以在设备上直接显示
+- [ ] tui刷新问题 
+- [ ] i18n
