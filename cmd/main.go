@@ -23,6 +23,7 @@ type textInputModel struct {
 	value       string
 	cursor      int
 	placeholder string
+	done        bool
 }
 
 func initialTextInputModel() textInputModel {
@@ -30,6 +31,7 @@ func initialTextInputModel() textInputModel {
 		value:       "",
 		cursor:      0,
 		placeholder: "Enter file path...",
+		done:        false,
 	}
 }
 
@@ -94,7 +96,11 @@ func (m textInputModel) Update(msg bubbletea.Msg) (textInputModel, bubbletea.Cmd
 		case "end":
 			m.cursor = len(m.value)
 		case "up", "down":
-			// Ignore up and down keys
+			// Ignore up and down key+s
+
+		case "enter":
+			m.done = true
+
 		default:
 			if msg.String() != "enter" && msg.String() != "home" && msg.String() != "end" {
 				m.value = m.value[:m.cursor] + msg.String() + m.value[m.cursor:]
@@ -145,6 +151,10 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 	case bubbletea.KeyMsg:
 		if m.filePrompt {
 			m.textInput, _ = m.textInput.Update(msg)
+			if m.textInput.done {
+				m.mode = "📤 Send"
+				return m, bubbletea.Quit
+			}
 			return m, nil
 		}
 
@@ -160,8 +170,11 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 		case "enter":
 			if m.filePrompt {
 				m.textInput, _ = m.textInput.Update(msg)
-				m.mode = "📤 Send"
-				return m, bubbletea.Quit
+				if m.textInput.done {
+					m.mode = "📤 Send"
+					return m, bubbletea.Quit
+				}
+				return m, nil
 			} else {
 				m.mode = m.choices[m.cursor]
 				if m.mode == "📤 Send" {
@@ -292,6 +305,7 @@ func main() {
 		}
 
 		logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:53317", local_ips[0]))
-		select {} // Block the program to wait for receiving files
+		select {}
+
 	}
 }
