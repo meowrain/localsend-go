@@ -144,6 +144,7 @@ func initialModel() model {
 func (m model) Init() bubbletea.Cmd {
 	return m.textInput.Init()
 }
+
 func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 	switch msg := msg.(type) {
 	case bubbletea.MouseMsg:
@@ -240,6 +241,7 @@ func (m model) View() string {
 
 	return s.String()
 }
+
 func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM) // Function to handle clean shutdown.
