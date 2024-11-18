@@ -23,10 +23,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
           go-version: 1.22
 
@@ -34,25 +34,26 @@ jobs:
         run: |
           GOOS=$(echo ${{ matrix.platform }} | cut -d '/' -f1) \
           GOARCH=$(echo ${{ matrix.platform }} | cut -d '/' -f2) \
-          go build -o ./bin/localsend_cli-${{ matrix.platform }}$(if [[ ${{ matrix.platform }} == *"windows"* ]]; then echo ".exe"; fi) ./cmd
+          mkdir -p ./artifacts \
+          && go build -o ./artifacts/localsend_cli-${{ matrix.platform }}$(if [[ ${{ matrix.platform }} == *"windows"* ]]; then echo ".exe"; fi) ./cmd
 
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
           draft: false
           prerelease: false
 
-      - name: Upload Release Asset
+      - name: Upload Release Artifact
         uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./bin/
-          asset_name: ${{ matrix.platform }}-builds
-          asset_content_type: application/zip
+          asset_path: ./artifacts/localsend_cli-${{ matrix.platform }}$(if [[ ${{ matrix.platform }} == *"windows"* ]]; then echo ".exe"; fi)
+          asset_name: localsend_cli-${{ matrix.platform }}$(if [[ ${{ matrix.platform }} == *"windows"* ]]; then echo ".exe"; fi)
+          asset_content_type: application/octet-stream
