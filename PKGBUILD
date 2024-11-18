@@ -1,7 +1,7 @@
 # Contributor: ilius saeedgnu@riseup.net
 # Maintainer: meowrain meowrain@126.com
 pkgname=localsend-go
-pkgver=1.1.0
+pkgver=v1.2.0
 pkgrel=1
 pkgdesc="CLI for localsend implemented in Go "
 arch=('x86_64' 'aarch64' 'armv7h' 'riscv64')
