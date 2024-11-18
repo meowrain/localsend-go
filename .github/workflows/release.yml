@@ -3,31 +3,14 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # This triggers the workflow when a tag starting with 'v' is pushed
+      - "v*"
 
 jobs:
-  build:
+  create-release:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        platform: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
-
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: 1.22
-
-      - name: Build for ${{ matrix.platform }}
-        run: |
-          GOOS=$(echo ${{ matrix.platform }} | cut -d '/' -f1) \
-          GOARCH=$(echo ${{ matrix.platform }} | cut -d '/' -f2) \
-          go build -o ./bin/localsend_cli-${{ matrix.platform }}$(if [[ ${{ matrix.platform }} == *"windows"* ]]; then echo ".exe"; fi) ./cmd
-
       - name: Create Release
         id: create_release
         uses: actions/create-release@v1
@@ -39,12 +22,56 @@ jobs:
           draft: false
           prerelease: false
 
+  build:
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform:
+          [
+            linux/amd64,
+            linux/arm64,
+            darwin/amd64,
+            darwin/arm64,
+            windows/amd64,
+            windows/arm64,
+          ]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.22
+
+      - name: Get OS and ARCH
+        id: platform
+        run: |
+          echo "GOOS=$(echo ${{ matrix.platform }} | cut -d '/' -f1)" >> $GITHUB_OUTPUT
+          echo "GOARCH=$(echo ${{ matrix.platform }} | cut -d '/' -f2)" >> $GITHUB_OUTPUT
+          FORMATTED_PLATFORM=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
+          echo "FORMATTED_PLATFORM=$FORMATTED_PLATFORM" >> $GITHUB_OUTPUT
+          if [[ "${{ matrix.platform }}" == *"windows"* ]]; then
+            echo "EXT=.exe" >> $GITHUB_OUTPUT
+          else
+            echo "EXT=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build
+        env:
+          GOOS: ${{ steps.platform.outputs.GOOS }}
+          GOARCH: ${{ steps.platform.outputs.GOARCH }}
+        run: |
+          mkdir -p ./artifacts
+          go build -o "./artifacts/localsend_cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" ./cmd
+
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./bin/
-          asset_name: ${{ github.ref }}-builds
-          asset_content_type: application/zip
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          asset_path: ./artifacts/localsend_cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
+          asset_name: localsend_cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
+          asset_content_type: application/octet-stream
