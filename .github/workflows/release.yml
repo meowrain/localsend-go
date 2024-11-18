@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     tags:
-      - 'v*'  # This triggers the workflow when a tag starting with 'v' is pushed
+      - "v*" # This triggers the workflow when a tag starting with 'v' is pushed
 
 jobs:
   build:
@@ -11,7 +11,15 @@ jobs:
 
     strategy:
       matrix:
-        platform: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64, windows/arm64]
+        platform:
+          [
+            linux/amd64,
+            linux/arm64,
+            darwin/amd64,
+            darwin/arm64,
+            windows/amd64,
+            windows/arm64,
+          ]
 
     steps:
       - name: Checkout code
@@ -32,7 +40,7 @@ jobs:
         id: create_release
         uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         with:
           tag_name: ${{ github.ref }}
           release_name: Release ${{ github.ref }}
@@ -42,9 +50,9 @@ jobs:
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PAT }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./bin/
-          asset_name: ${{ github.ref }}-builds
+          asset_name: ${{ matrix.platform }}-builds
           asset_content_type: application/zip
