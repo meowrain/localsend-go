@@ -5,8 +5,10 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"localsend_cli/internal/config"
 	"localsend_cli/internal/discovery"
@@ -239,6 +241,13 @@ func (m model) View() string {
 	return s.String()
 }
 func main() {
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM) // Function to handle clean shutdown.
+	go func() {
+		<-signalChan
+		fmt.Println("\nReceived interrupt signal. Exiting...")
+		os.Exit(0)
+	}()
 	logger.InitLogger()
 
 	// Start HTTP server
