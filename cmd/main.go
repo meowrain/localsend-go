@@ -326,8 +326,7 @@ func main() {
 		httpServer.HandleFunc("/", handlers.IndexFileHandler)
 		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
 		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
-		httpServer.HandleFunc("/send", handlers.NormalSendHandler)       // Upload handler
-		httpServer.HandleFunc("/receive", handlers.NormalReceiveHandler) // Download handler
+		httpServer.HandleFunc("/send", handlers.NormalSendHandler) // Upload handler
 	}
 	/* Send and receive section */
 	if config.ConfigData.Functions.LocalSendServer {
@@ -372,6 +371,11 @@ func main() {
 	}
 
 	if mode == "📥 Receive" {
+		err = os.MkdirAll("uploads", 0755)
+		if err != nil {
+			logger.Errorf("Failed to create uploads directory: %v", err)
+			return
+		}
 		discovery.ListenAndStartBroadcasts(nil)
 		logger.Info("Waiting to receive files...")
 		ips, _ := discovery.GetLocalIP()

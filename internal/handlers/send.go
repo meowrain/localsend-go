@@ -203,44 +203,79 @@ func SendFile(path string) error {
 	return nil
 }
 
-// SendHandler 处理文件上传请求
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
-	// 解析 multipart/form-data
+	fmt.Println("Handling upload request...") // Debug log - request start
+
+	// 限制表单数据大小（此处设置为 10 MB，可根据需要调整）
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		http.Error(w, fmt.Sprintf("Could not parse multipart form: %v", err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("解析表单失败: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// 获取文件
-	file, handler, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Could not get uploaded file: %v", err), http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
+	// 获取上传的目录名 (来自前端 hidden input)
+	uploadedDirName := r.FormValue("directoryName")
+	fmt.Printf("directoryName from form: '%s'\n", uploadedDirName) // Debug log - directoryName value
 
-	// 创建上传目录（如果不存在）
-	uploadDir := "./uploads"
-	if err := os.MkdirAll(uploadDir, os.ModePerm); err != nil {
-		http.Error(w, fmt.Sprintf("Could not create upload directory: %v", err), http.StatusInternalServerError)
+	// 获取所有上传的文件
+	files := r.MultipartForm.File["file"]
+	if len(files) == 0 {
+		http.Error(w, "未上传任何文件", http.StatusBadRequest)
 		return
 	}
 
-	// 创建目标文件
-	filePath := filepath.Join(uploadDir, handler.Filename)
-	dst, err := os.Create(filePath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Could not create file: %v", err), http.StatusInternalServerError)
+	uploadDir := "./uploads"    // 基础上传目录
+	finalUploadDir := uploadDir // 默认最终上传目录
+
+	// 如果前端传递了目录名且不为空，才创建以目录名命名的子目录
+	if uploadedDirName != "" {
+		finalUploadDir = filepath.Join(uploadDir, uploadedDirName)
+	} else {
+		fmt.Println("No directoryName provided, uploading to root uploads dir.") // Debug log - no directoryName
+	}
+	fmt.Printf("Final upload directory: '%s'\n", finalUploadDir) // Debug log - final upload directory
+
+	// 创建最终的上传目录（如果不存在）
+	if err := os.MkdirAll(finalUploadDir, os.ModePerm); err != nil {
+		http.Error(w, fmt.Sprintf("无法创建上传目录: %v", err), http.StatusInternalServerError)
 		return
 	}
-	defer dst.Close()
 
-	// 将上传的文件内容写入目标文件
-	if _, err := io.Copy(dst, file); err != nil {
-		http.Error(w, fmt.Sprintf("Could not save file: %v", err), http.StatusInternalServerError)
-		return
+	// 遍历所有文件进行保存
+	for _, fileHeader := range files {
+		// 打开上传的文件
+		file, err := fileHeader.Open()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("无法打开文件: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+
+		// 拼接目标路径 (使用 finalUploadDir 作为根目录)
+		destPath := filepath.Join(finalUploadDir, fileHeader.Filename)
+		fmt.Printf("Saving file '%s' to destPath: '%s'\n", fileHeader.Filename, destPath) // Debug log - file dest path
+
+		// 创建目标目录（如果不存在）
+		if err := os.MkdirAll(filepath.Dir(destPath), os.ModePerm); err != nil {
+			http.Error(w, fmt.Sprintf("无法创建目录: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// 创建目标文件
+		dst, err := os.Create(destPath)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("无法创建文件: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer dst.Close()
+
+		// 将上传的文件内容写入目标文件
+		if _, err := io.Copy(dst, file); err != nil {
+			http.Error(w, fmt.Sprintf("保存文件失败: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "File uploaded successfully: %s\n", handler.Filename)
+	fmt.Fprintf(w, "文件上传成功，共计 %d 个文件，上传到目录: %s\n", len(files), finalUploadDir)
+	fmt.Println("Upload request finished successfully.") // Debug log - request finish
 }

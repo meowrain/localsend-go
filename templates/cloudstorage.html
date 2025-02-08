@@ -1,25 +1,168 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Uploads</title>
-    <link href="/static/css/style.css" rel="stylesheet">
-</head>
-<body>
+    <link href="/static/css/style.css" rel="stylesheet" />
+    <style>
+      /* 进度条容器样式 */
+      .progress-container {
+        width: 100%;
+        background: #e0e0e0;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-top: 10px;
+        height: 20px;
+        display: none; /* 默认隐藏，上传时显示 */
+      }
+      .progress-bar {
+        height: 100%;
+        width: 0%;
+        background: linear-gradient(135deg, #28a745, #20c997);
+        transition: width 0.2s ease;
+      }
+    </style>
+  </head>
+  <body>
     <div class="container">
-        <h1>Uploads</h1>
-        <ul>
-            {{range .Files}}
-                <li>
-                    {{if .IsDir}}
-                        <a href="{{$.Path}}{{.Name}}/">{{.Name}}/</a>
-                    {{else}}
-                        <a href="{{$.Path}}{{.Name}}">{{.Name}}</a>
-                    {{end}}
-                </li>
-            {{end}}
-        </ul>
+      <h1>Uploads</h1>
+      <!-- 文件上传表单 -->
+      <form class="upload-form" id="uploadForm">
+        <!-- 上传按钮组 -->
+        <div class="upload-buttons">
+          <label for="file-input" class="upload-button">选择文件</label>
+          <input
+            id="file-input"
+            class="upload-input"
+            type="file"
+            name="file"
+            multiple
+          />
+          <label for="folder-input" class="upload-button">选择文件夹</label>
+          <input
+            id="folder-input"
+            class="upload-input"
+            type="file"
+            name="file"
+            webkitdirectory
+            multiple
+          />
+        </div>
+        <!-- 进度条 -->
+        <div class="progress-container" id="progressContainer">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+        <!-- 上传按钮 -->
+        <button type="submit">上传</button>
+        <input type="hidden" id="directoryName" name="directoryName" value="" />
+        <!-- Hidden input for directory name -->
+      </form>
+
+      <!-- 显示服务器上文件列表（例如目录下的文件、文件夹） -->
+      <ul>
+        {{range .Files}}
+        <li>
+          {{if .IsDir}}
+          <a href="{{$.Path}}{{.Name}}/">{{.Name}}/</a>
+          {{else}}
+          <a href="{{$.Path}}{{.Name}}">{{.Name}}</a>
+          {{end}}
+        </li>
+        {{end}}
+      </ul>
     </div>
-</body>
+    <script>
+      // 更新选择文件按钮的文本
+      document
+        .getElementById("file-input")
+        .addEventListener("change", function (e) {
+          const files = e.target.files;
+          const label = document.querySelector("label[for='file-input']");
+          if (files.length > 0) {
+            label.textContent =
+              files.length === 1
+                ? `已选择: ${files[0].name}`
+                : `已选择: ${files.length} 个文件`;
+          } else {
+            label.textContent = "选择文件";
+          }
+        });
+
+      // 更新选择文件夹按钮的文本 and extract directory name
+      document
+        .getElementById("folder-input")
+        .addEventListener("change", function (e) {
+          const files = e.target.files;
+          const label = document.querySelector("label[for='folder-input']");
+          const directoryNameInput = document.getElementById("directoryName");
+          let directoryName = ""; // Default to empty for single file uploads
+
+          if (files.length > 0) {
+            label.textContent =
+              files.length === 1
+                ? `已选择: ${files[0].webkitRelativePath || files[0].name}`
+                : `已选择: ${files.length} 个文件`;
+
+            if (files[0].webkitRelativePath) {
+              const relativePathParts = files[0].webkitRelativePath.split("/");
+              if (relativePathParts.length > 0) {
+                directoryName = relativePathParts[0]; // Extract directory name for folder uploads
+              }
+            }
+          } else {
+            label.textContent = "选择文件夹";
+          }
+          directoryNameInput.value = directoryName; // Set directory name in hidden input
+        });
+
+      // 处理表单提交：利用 XMLHttpRequest 实现上传进度
+      // 处理表单提交：利用 XMLHttpRequest 实现上传进度
+      document
+        .getElementById("uploadForm")
+        .addEventListener("submit", function (e) {
+          const form = e.target;
+          e.preventDefault(); // 阻止默认表单提交
+          const formData = new FormData(this); // Use FormData constructor with the form
+          const directoryNameInput = document.getElementById("directoryName"); // Get hidden input
+
+          // 显示进度条
+          const progressContainer =
+            document.getElementById("progressContainer");
+          const progressBar = document.getElementById("progressBar");
+          progressContainer.style.display = "block";
+          progressBar.style.width = "0%";
+
+          // 使用 XMLHttpRequest 实现上传和进度监控
+          const xhr = new XMLHttpRequest();
+          xhr.open("POST", "/send", true);
+
+          // 监听上传进度事件
+          xhr.upload.onprogress = function (event) {
+            if (event.lengthComputable) {
+              const percentComplete = (event.loaded / event.total) * 100;
+              progressBar.style.width = percentComplete + "%";
+            }
+          };
+
+          // 上传完成回调
+          xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              alert("上传成功！");
+              directoryNameInput.value = ""; // 清空 directoryName 的值
+              form.reset(); // 重置表单
+              window.location.reload();
+            } else {
+              alert("上传失败，请重试。");
+            }
+          };
+
+          xhr.onerror = function () {
+            alert("上传出错，请检查网络或服务器状态。");
+          };
+
+          xhr.send(formData);
+        });
+    </script>
+  </body>
 </html>

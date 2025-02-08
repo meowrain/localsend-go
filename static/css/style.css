@@ -1,6 +1,24 @@
+/* 定义全局颜色和字体变量 */
+:root {
+  --primary-color: #007bff;
+  --secondary-color: #00d4ff;
+  --success-color: #28a745;
+  --hover-primary: #0069d9;
+  --hover-secondary: #00bcd4;
+  --hover-success: #218838;
+  --font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --bg-gradient-start: #f6f8fa;
+  --bg-gradient-end: #e9ecef;
+}
+
+/* 全局基础样式 */
 body {
-  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  background: linear-gradient(135deg, #f6f8fa 0%, #e9ecef 100%);
+  font-family: var(--font-family);
+  background: linear-gradient(
+    135deg,
+    var(--bg-gradient-start) 0%,
+    var(--bg-gradient-end) 100%
+  );
   margin: 0;
   padding: 0;
   display: flex;
@@ -8,18 +26,22 @@ body {
   align-items: center;
   min-height: 100vh;
 }
+
+/* 主容器 */
 .container {
   background-color: #fff;
   padding: 30px 50px;
   border-radius: 16px;
-  box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.02);
   width: 90%;
   max-width: 800px;
   box-sizing: border-box;
   border: 1px solid rgba(255, 255, 255, 0.3);
   -webkit-backdrop-filter: blur(4px);
   backdrop-filter: blur(4px);
+  box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.02);
 }
+
+/* 标题样式 */
 h1 {
   color: #333;
   text-align: center;
@@ -30,6 +52,7 @@ h1 {
   position: relative;
   padding-bottom: 20px;
 }
+
 h1::after {
   content: "";
   position: absolute;
@@ -38,36 +61,134 @@ h1::after {
   transform: translateX(-50%);
   width: 60px;
   height: 3px;
-  background: linear-gradient(90deg, #007bff 0%, #00d4ff 100%);
+  background: linear-gradient(
+    90deg,
+    var(--primary-color) 0%,
+    var(--secondary-color) 100%
+  );
   border-radius: 2px;
 }
+
+/* 列表样式 */
 ul {
   list-style: none;
   padding: 0;
   margin: 0;
 }
+
 li {
   margin: 12px 0;
   padding: 16px 20px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(0, 0, 0, 0.05);
-  transition: all 0.3s ease;
-  cursor: pointer;
   display: flex;
   align-items: center;
   gap: 12px;
+  transition: all 0.3s ease;
+  cursor: pointer;
 }
+
 li:hover {
-  background: rgba(255, 255, 255, 1);
+  background: #fff;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   transform: translateY(-2px);
 }
+
+/* 链接样式 */
 a {
   text-decoration: none;
-  color: #007bff;
+  color: var(--primary-color);
   font-weight: bold;
 }
+
 a:hover {
   text-decoration: underline;
+}
+
+/* 表单样式 */
+.upload-form {
+  margin-bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 隐藏默认文件输入框 */
+.upload-form input[type="file"] {
+  display: none;
+}
+
+/* 自定义文件选择按钮 */
+.upload-form label {
+  background: linear-gradient(
+    135deg,
+    var(--primary-color),
+    var(--secondary-color)
+  );
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+}
+
+.upload-form label:hover {
+  background: linear-gradient(
+    135deg,
+    var(--hover-primary),
+    var(--hover-secondary)
+  );
+  box-shadow: 0 6px 16px rgba(0, 123, 255, 0.3);
+}
+
+/* 上传按钮 */
+.upload-form button {
+  background: linear-gradient(135deg, var(--success-color), #20c997);
+  color: #fff;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
+}
+
+.upload-form button:hover {
+  background: linear-gradient(135deg, var(--hover-success), #1aa179);
+  box-shadow: 0 6px 16px rgba(40, 167, 69, 0.3);
+}
+
+/* 新增：上传按钮组样式 */
+.upload-buttons {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+.upload-button {
+  display: inline-block;
+  padding: 12px 24px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #007bff, #00d4ff);
+  color: #fff;
+  font-weight: 500;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+}
+.upload-button:hover {
+  background: linear-gradient(135deg, #0069d9, #00bcd4);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 123, 255, 0.3);
+}
+/* 隐藏真实文件输入框 */
+.upload-input {
+  display: none;
 }
