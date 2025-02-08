@@ -1,7 +1,7 @@
 # Contributor: ilius saeedgnu@riseup.net
 # Maintainer: meowrain meowrain@126.com
 pkgname=localsend-go
-pkgver=v1.2.0
+pkgver=v1.2.1
 pkgrel=1
 pkgdesc="CLI for localsend implemented in Go "
 arch=('x86_64' 'aarch64' 'armv7h' 'riscv64')
@@ -9,7 +9,7 @@ url="https://github.com/meowrain/localsend-go"
 license=('MIT')
 depends=('go')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/meowrain/localsend-go/archive/refs/tags/$pkgver.tar.gz")
-sha256sums=('ad1178bdf418ef638d3b89dd4faed8c70c18ab56e365eadd8442a362e37f0e9e')
+sha256sums=('07F121B98AB3D5E6B48213B6637DFCF530182CA31E0817E7BA04AB805912A275')
 build(){
   cd "$srcdir/$pkgname-$pkgver"
   go build -o "$pkgname" "cmd/main.go"

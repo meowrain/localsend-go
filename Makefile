@@ -11,7 +11,7 @@ OUT_DIR := ./bin
 GO := go
 
 # 目标平台
-PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+PLATFORMS := linux/amd64 linux/arm64 linux/riscv64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
 # 默认目标
 .PHONY: all
