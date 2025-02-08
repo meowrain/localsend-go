@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -105,8 +106,14 @@ func (m textInputModel) Update(msg bubbletea.Msg) (textInputModel, bubbletea.Cmd
 
 		default:
 			if msg.String() != "enter" && msg.String() != "home" && msg.String() != "end" {
-				m.value = m.value[:m.cursor] + msg.String() + m.value[m.cursor:]
-				m.cursor++
+				// 只允许输入有效的路径字符
+				char := msg.String()
+				// 检查是否是有效的路径字符
+				if char == "." || char == "/" || char == "\\" || char == ":" || char == "-" || char == "_" ||
+					(char >= "a" && char <= "z") || (char >= "A" && char <= "Z") || (char >= "0" && char <= "9") {
+					m.value = m.value[:m.cursor] + char + m.value[m.cursor:]
+					m.cursor++
+				}
 			}
 		}
 	}
@@ -117,7 +124,12 @@ func (m textInputModel) View() string {
 	if len(m.value) == 0 {
 		return m.placeholder
 	}
-	return m.value[:m.cursor] + "_" + m.value[m.cursor:]
+	value := m.value
+	cursor := m.cursor
+	if cursor > len(value) {
+		cursor = len(value)
+	}
+	return value[:cursor] + "_" + value[cursor:]
 }
 
 func (m textInputModel) Value() string {
@@ -125,11 +137,12 @@ func (m textInputModel) Value() string {
 }
 
 type model struct {
-	mode       string
-	choices    []string
-	cursor     int
-	filePrompt bool
-	textInput  textInputModel
+	mode        string
+	choices     []string
+	cursor      int
+	filePrompt  bool
+	textInput   textInputModel
+	suggestions []string
 }
 
 func initialModel() model {
@@ -144,11 +157,52 @@ func initialModel() model {
 func (m model) Init() bubbletea.Cmd {
 	return m.textInput.Init()
 }
+
+var (
+	titleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#7571F9")).
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, 2).
+			MarginBottom(1)
+
+	menuStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			PaddingLeft(4)
+
+	selectedItemStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#7571F9")).
+				PaddingLeft(2).
+				SetString("❯ ")
+
+	unselectedItemStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FAFAFA")).
+				PaddingLeft(4)
+
+	inputPromptStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#7571F9")).
+				PaddingLeft(2)
+
+	inputStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FAFAFA")).
+			PaddingLeft(1)
+)
+
 func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 	switch msg := msg.(type) {
 	case bubbletea.MouseMsg:
-		// 忽略鼠标事件
-		return m, nil
+		if msg.Type == bubbletea.MouseLeft {
+			if msg.Y > 3 && msg.Y <= len(m.choices)+3 {
+				m.cursor = msg.Y - 4
+				m.mode = m.choices[m.cursor]
+				if m.mode == "📤 Send" {
+					m.filePrompt = true
+					return m, nil
+				} else {
+					return m, bubbletea.Quit
+				}
+			}
+		}
 
 	case bubbletea.KeyMsg:
 		if m.filePrompt {
@@ -156,6 +210,18 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 			if m.textInput.done {
 				m.mode = "📤 Send"
 				return m, bubbletea.Quit
+			}
+			m.suggestions = getPathSuggestions(m.textInput.value)
+			switch msg.String() {
+			case "tab":
+				if len(m.suggestions) > 0 {
+					if m.cursor >= len(m.suggestions)-1 {
+						m.cursor = 0
+					} else {
+						m.cursor++
+					}
+					m.textInput.value = m.suggestions[m.cursor]
+				}
 			}
 			return m, nil
 		}
@@ -209,37 +275,41 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 func (m model) View() string {
 	var s strings.Builder
 
-	titleStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("62")).
-		Padding(1, 2).
-		Align(lipgloss.Center).
-		Foreground(lipgloss.Color("#FAFAFA"))
-
-	s.WriteString(titleStyle.Render("💻 LocalSend CLI 💻"))
+	// 标题
+	s.WriteString(titleStyle.Render("💫 LocalSend CLI 💫"))
 	s.WriteString("\n\n")
 
-	choiceStyle := lipgloss.NewStyle().
-		Padding(0, 2).
-		Foreground(lipgloss.Color("205"))
-
-	cursorStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("99"))
-
-	for i, choice := range m.choices {
-		cursor := " "
-		if m.cursor == i {
-			cursor = cursorStyle.Render(">")
+	// 菜单
+	if m.mode == "" {
+		for i, choice := range m.choices {
+			if i == m.cursor {
+				s.WriteString(selectedItemStyle.Render(choice))
+			} else {
+				s.WriteString(unselectedItemStyle.Render(choice))
+			}
+			s.WriteString("\n")
 		}
-		s.WriteString(fmt.Sprintf("%s %s\n", cursor, choiceStyle.Render(choice)))
-	}
+	} else {
+		// 显示当前模式
+		s.WriteString(menuStyle.Render(m.mode))
+		s.WriteString("\n\n")
 
-	if m.filePrompt {
-		s.WriteString("\n\nEnter file path: " + m.textInput.View())
+		// 文件路径输入
+		if m.filePrompt {
+			s.WriteString(inputPromptStyle.Render("Enter file path: "))
+			s.WriteString(inputStyle.Render(m.textInput.View()))
+		}
 	}
 
 	return s.String()
 }
+
+var port int
+
+func init() {
+	flag.IntVar(&port, "port", 53317, "Port to listen on")
+}
+
 func main() {
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM) // Function to handle clean shutdown.
@@ -266,8 +336,8 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
 	}
 	go func() {
-		logger.Info("Server started at :53317")
-		if err := http.ListenAndServe(":53317", httpServer); err != nil {
+		logger.Info("Server started at :" + fmt.Sprintf("%d", port))
+		if err := http.ListenAndServe(":"+fmt.Sprintf("%d", port), httpServer); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
@@ -305,15 +375,14 @@ func main() {
 		discovery.ListenAndStartBroadcasts(nil)
 		logger.Info("Waiting to receive files...")
 		ips, _ := discovery.GetLocalIP()
-		local_ips := make([]string, 0)
 
 		for _, ip := range ips {
-			if strings.HasPrefix(ip.String(), "192.168") {
-				local_ips = append(local_ips, ip.String())
+			ipStr := ip.String()
+			if strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "192.168.") || (strings.HasPrefix(ipStr, "172.") && len(ipStr) >= 7 && ipStr[4] >= '1' && ipStr[4] <= '6') {
+				logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:%d", ip, port))
 			}
 		}
 
-		logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:53317", local_ips[0]))
 		select {}
 
 	}

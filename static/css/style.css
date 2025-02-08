@@ -1,48 +1,73 @@
 body {
-    font-family: Arial, sans-serif;
-    background-color: #f4f4f4;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    min-height: 100vh;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: linear-gradient(135deg, #f6f8fa 0%, #e9ecef 100%);
+  margin: 0;
+  padding: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
 }
 .container {
-    background-color: #fff;
-    padding: 20px 40px;
-    border-radius: 10px;
-    box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-    width: 80%;
-    max-width: 700px;
-    box-sizing: border-box;
+  background-color: #fff;
+  padding: 30px 50px;
+  border-radius: 16px;
+  box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.02);
+  width: 90%;
+  max-width: 800px;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
 h1 {
-    color: #333;
-    text-align: center;
-    margin-bottom: 30px;
-    font-size: 2em;
+  color: #333;
+  text-align: center;
+  margin-bottom: 40px;
+  font-size: 2.2em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  position: relative;
+  padding-bottom: 20px;
+}
+h1::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60px;
+  height: 3px;
+  background: linear-gradient(90deg, #007bff 0%, #00d4ff 100%);
+  border-radius: 2px;
 }
 ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 li {
-    margin: 10px 0;
-    padding: 10px;
-    border-radius: 5px;
-    transition: background-color 0.3s, transform 0.3s;
+  margin: 12px 0;
+  padding: 16px 20px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 li:hover {
-    background-color: #f1f1f1;
-    transform: scale(1.02);
+  background: rgba(255, 255, 255, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
 }
 a {
-    text-decoration: none;
-    color: #007BFF;
-    font-weight: bold;
+  text-decoration: none;
+  color: #007bff;
+  font-weight: bold;
 }
 a:hover {
-    text-decoration: underline;
+  text-decoration: underline;
 }

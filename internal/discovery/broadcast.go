@@ -23,31 +23,33 @@ func ListenAndStartBroadcasts(updates chan<- []models.SendModel) {
 	logger.Info("Start broadcasts...")
 	go StartUDPBroadcast()
 }
-
-// ListenForHttpBroadCast 向局域网内的所有 IP 发送 HTTP 请求
 func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
-	for {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
 		data, err := json.Marshal(shared.Message)
 		if err != nil {
-			panic(err)
+			logger.Errorf("Failed to marshal message: %v", err)
+			continue
 		}
 
 		ips, err := pingScan()
 		if err != nil {
-			logger.Errorf("Failed to discover devices via ping scan:", err)
-			return
+			logger.Errorf("Failed to discover devices via ping scan: %v", err)
+			continue
 		}
 
 		var wg sync.WaitGroup
+		var mu sync.Mutex
 		for _, ip := range ips {
 			wg.Add(1)
 			go func(ip string) {
 				defer wg.Done()
-
 				url := fmt.Sprintf("https://%s:53317/api/localsend/v2/register", ip)
 				req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
 				if err != nil {
-					logger.Errorf("Failed to create HTTP request:", err)
+					logger.Errorf("Failed to create HTTP request for %s: %v", ip, err)
 					return
 				}
 				req.Header.Set("Content-Type", "application/json")
@@ -55,9 +57,7 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 				client := &http.Client{
 					Timeout: 2 * time.Second,
 					Transport: &http.Transport{
-						TLSClientConfig: &tls.Config{
-							InsecureSkipVerify: true,
-						},
+						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 					},
 				}
 
@@ -69,23 +69,25 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 
 				body, err := io.ReadAll(resp.Body)
 				if err != nil {
-					logger.Errorf("Failed to read HTTP response body:", err)
+					logger.Errorf("Failed to read HTTP response body from %s: %v", ip, err)
 					return
 				}
+
 				var response models.BroadcastMessage
-				err = json.Unmarshal(body, &response)
-				if err != nil {
-					logger.Errorf("Failed to parse HTTP response from %s: %v\n", ip, err)
+				if err := json.Unmarshal(body, &response); err != nil {
+					logger.Errorf("Failed to parse HTTP response from %s: %v", ip, err)
 					return
 				}
+
+				mu.Lock()
 				shared.DiscoveredDevices[ip] = response
+				mu.Unlock()
 			}(ip)
 		}
 
 		wg.Wait()
 
-		// Convert allDevices map to a slice of SendModel
-		var devices []models.SendModel
+		devices := make([]models.SendModel, 0, len(shared.DiscoveredDevices))
 		for ip, device := range shared.DiscoveredDevices {
 			devices = append(devices, models.SendModel{
 				IP:         ip,
@@ -93,10 +95,11 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 			})
 		}
 
-		// Send the updated devices list to the channel
-		updates <- devices
+		select {
+		case updates <- devices:
+		default:
 
-		time.Sleep(5 * time.Second) // 每5秒发送一次HTTP广播消息
+		}
 	}
 }
 
