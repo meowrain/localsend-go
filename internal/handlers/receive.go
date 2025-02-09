@@ -9,10 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"localsend_cli/internal/models"
 	"localsend_cli/internal/utils/clipboard"
 	"localsend_cli/internal/utils/logger"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 var (
@@ -95,27 +98,85 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	// 创建一个 context 来处理请求取消
+	ctx := r.Context()
+
+	// 创建文件后，获取文件大小
+	contentLength := r.ContentLength
+
+	// 创建进度条
+	bar := progressbar.NewOptions64(
+		contentLength,
+		progressbar.OptionSetDescription(fmt.Sprintf("下载 %s", fileName)),
+		progressbar.OptionSetWidth(15),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
+		progressbar.OptionShowCount(),
+		progressbar.OptionClearOnFinish(), // 完成时清除进度条
+		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionSetPredictTime(true), // 预测剩余时间
+		progressbar.OptionFullWidth(),          // 使用全宽显示
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "█", // 使用实心方块
+			SaucerHead:    "█",
+			SaucerPadding: "░", // 使用灰色方块作为背景
+			BarStart:      "|",
+			BarEnd:        "|",
+		}),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+	)
+
 	buffer := make([]byte, 2*1024*1024) // 2MB 缓冲区
-	for {
-		n, err := r.Body.Read(buffer)
-		if err != nil && err != io.EOF {
-			http.Error(w, "Failed to read file", http.StatusInternalServerError)
-			logger.Errorf("Error reading file:", err)
-			return
-		}
-		if n == 0 {
-			break
-		}
 
-		_, err = file.Write(buffer[:n])
+	// 使用 channel 来处理传输完成或取消
+	done := make(chan error, 1)
+
+	go func() {
+		for {
+			n, err := r.Body.Read(buffer)
+			if err != nil && err != io.EOF {
+				done <- fmt.Errorf("读取文件失败: %w", err)
+				return
+			}
+			if n == 0 {
+				done <- nil
+				return
+			}
+
+			_, err = file.Write(buffer[:n])
+			if err != nil {
+				done <- fmt.Errorf("写入文件失败: %w", err)
+				return
+			}
+
+			bar.Add(n)
+		}
+	}()
+
+	// 等待传输完成或取消
+	select {
+	case err := <-done:
 		if err != nil {
-			http.Error(w, "Failed to write file", http.StatusInternalServerError)
-			logger.Failedf("Failed to write file:", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			logger.Errorf("传输错误:", err)
+			// 删除未完成的文件
+			os.Remove(filePath)
 			return
-
 		}
+	case <-ctx.Done():
+		// 请求被取消
+		logger.Info("传输被取消")
+		// 删除未完成的文件
+		os.Remove(filePath)
+		// 关闭连接
+		if conn, ok := w.(http.CloseNotifier); ok {
+			conn.CloseNotify()
+		}
+		return
 	}
 
-	logger.Success("Saved file to:", filePath)
+	logger.Success("文件保存到:", filePath)
 	w.WriteHeader(http.StatusOK)
 }

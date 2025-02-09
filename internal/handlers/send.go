@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"localsend_cli/internal/tui"
 	"localsend_cli/internal/utils/logger"
 	"localsend_cli/internal/utils/sha256"
+
+	"github.com/schollz/progressbar/v3"
 )
 
 // SendFileToOtherDevicePrepare 函数
@@ -109,7 +112,7 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 }
 
 // uploadFile 函数
-func uploadFile(ip, sessionId, fileId, token, filePath string) error {
+func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath string) error {
 	// 打开要发送的文件
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -117,32 +120,95 @@ func uploadFile(ip, sessionId, fileId, token, filePath string) error {
 	}
 	defer file.Close()
 
-	// 创建文件内容的请求体
-	var requestBody bytes.Buffer
-	if _, err := io.Copy(&requestBody, file); err != nil {
-		return fmt.Errorf("error copying file content: %w", err)
+	// 获取文件大小用于进度条
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("error getting file info: %w", err)
 	}
+	fileSize := fileInfo.Size()
+
+	// 创建进度条
+	bar := progressbar.NewOptions64(
+		fileSize,
+		progressbar.OptionSetDescription(fmt.Sprintf("上传 %s", filepath.Base(filePath))),
+		progressbar.OptionSetWidth(15),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
+		progressbar.OptionShowCount(),
+		progressbar.OptionClearOnFinish(), // 完成时清除进度条
+		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionSetPredictTime(true), // 预测剩余时间
+		progressbar.OptionFullWidth(),          // 使用全宽显示
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "█", // 使用实心方块
+			SaucerHead:    "█",
+			SaucerPadding: "░", // 使用灰色方块作为背景
+			BarStart:      "|",
+			BarEnd:        "|",
+		}),
+		progressbar.OptionOnCompletion(func() {
+			fmt.Fprint(os.Stderr, "\n")
+		}),
+	)
 
 	// 构建文件上传的 URL
 	uploadURL := fmt.Sprintf("https://%s:53317/api/localsend/v2/upload?sessionId=%s&fileId=%s&token=%s",
 		ip, sessionId, fileId, token)
+
+	// 使用 pipe 来避免将整个文件加载到内存中
+	pr, pw := io.Pipe()
+
+	// 创建一个错误通道来传递上传过程中的错误
+	uploadErr := make(chan error, 1)
+
+	go func() {
+		defer pw.Close()
+		// 在新的 goroutine 中写入文件数据
+		_, err := io.Copy(io.MultiWriter(pw, bar), file)
+		if err != nil {
+			uploadErr <- err
+			return
+		}
+	}()
+
+	// 创建带有 TLS 配置的 HTTP 客户端
 	client := &http.Client{
+		Timeout: 30 * time.Minute,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: true, // 跳过证书验证
 			},
+			MaxIdleConns:       100,
+			IdleConnTimeout:    90 * time.Second,
+			DisableCompression: true,
 		},
 	}
-	req, err := http.NewRequest("POST", uploadURL, &requestBody)
+
+	// 创建请求
+	req, err := http.NewRequestWithContext(ctx, "POST", uploadURL, pr)
 	if err != nil {
 		return fmt.Errorf("error creating POST request: %w", err)
 	}
+
 	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = fileSize
+
+	// 使用自定义客户端发送请求，而不是 http.DefaultClient
 	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("error sending file upload request: %w", err)
+
+	// 检查是否被取消
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("传输已取消")
+	case err := <-uploadErr:
+		if err != nil {
+			return fmt.Errorf("上传出错: %w", err)
+		}
+	default:
+		if err != nil {
+			return fmt.Errorf("error sending file upload request: %w", err)
+		}
 	}
-	defer resp.Body.Close()
 
 	// 检查响应
 	if resp.StatusCode != http.StatusOK {
@@ -159,6 +225,7 @@ func uploadFile(ip, sessionId, fileId, token, filePath string) error {
 		return fmt.Errorf("file upload failed: received status code %d", resp.StatusCode)
 	}
 
+	fmt.Println() // 添加换行，让进度条显示更清晰
 	logger.Success("File uploaded successfully")
 	return nil
 }
@@ -176,20 +243,28 @@ func SendFile(path string) error {
 	if err != nil {
 		return err
 	}
-	// logger.Info("response:", response)
+
+	// 创建一个用于取消的 context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 使用共享的 HTTP 服务器来处理取消请求
+	logger.Info("Registering cancel handler for session: ", response.SessionID)
+	RegisterCancelHandler(response.SessionID, cancel)
+	defer UnregisterCancelHandler(response.SessionID)
+
 	// 遍历目录和子文件
 	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
-			// 获取 fileId 和 token
-			fileId := info.Name() // 使用文件名作为 fileId
+			fileId := info.Name()
 			token, ok := response.Files[fileId]
 			if !ok {
 				return fmt.Errorf("token not found for file: %s", fileId)
 			}
-			err = uploadFile(ip, response.SessionID, fileId, token, filePath)
+			err = uploadFile(ctx, ip, response.SessionID, fileId, token, filePath)
 			if err != nil {
 				return fmt.Errorf("error uploading file: %w", err)
 			}

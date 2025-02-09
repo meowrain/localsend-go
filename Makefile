@@ -46,9 +46,14 @@ test:
 deps:
 	$(GO) mod tidy
 
+.PHONY:format
+format:
+	go fmt ./...
+
 # 使用方法
 .PHONY: help
 help:
+
 	@echo "Usage:"
 	@echo "  make            - 编译所有平台的可执行文件"
 	@echo "  make clean      - 清理输出目录"

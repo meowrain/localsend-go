@@ -206,6 +206,9 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 
 	case bubbletea.KeyMsg:
 		if m.filePrompt {
+			if msg.String() == "ctrl+c" {
+				return m, bubbletea.Quit
+			}
 			m.textInput, _ = m.textInput.Update(msg)
 			if m.textInput.done {
 				m.mode = "📤 Send"
@@ -312,10 +315,10 @@ func init() {
 
 func main() {
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM) // Function to handle clean shutdown.
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-signalChan
-		fmt.Println("\nReceived interrupt signal. Exiting...")
+		fmt.Println("\n收到中断信号，正在退出...")
 		os.Exit(0)
 	}()
 	logger.InitLogger()
@@ -333,6 +336,7 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
 		httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
+		httpServer.HandleFunc("/api/localsend/v2/cancel", handlers.HandleCancel)
 	}
 	go func() {
 		logger.Info("Server started at :" + fmt.Sprintf("%d", port))
@@ -342,7 +346,7 @@ func main() {
 	}()
 
 	// Run Bubble Tea program
-	p := bubbletea.NewProgram(initialModel())
+	p := bubbletea.NewProgram(initialModel(), bubbletea.WithoutSignalHandler())
 	m, err := p.Run()
 	if err != nil {
 		log.Fatal(err)
@@ -371,7 +375,7 @@ func main() {
 	}
 
 	if mode == "📥 Receive" {
-		err = os.MkdirAll("uploads", 0755)
+		err = os.MkdirAll("uploads", 0o755)
 		if err != nil {
 			logger.Errorf("Failed to create uploads directory: %v", err)
 			return
