@@ -1,10 +1,23 @@
 <div align="center">
     <h1>LocalSend Go</h1>
-    <h4>✨CLI for localsend implemented in Go✨</h4>
+    <h4>✨A LocalSend CLI Tool Implemented in Go✨</h4>
     <img src="https://forthebadge.com/images/badges/built-with-love.svg" />
     <br>
     <img src="https://counter.seku.su/cmoe?name=localsend-go&theme=mb" alt="localsend-go" />
 </div>
+
+## Introduction
+
+LocalSend Go is a command-line implementation of the LocalSend protocol in Go, supporting cross-platform file transfer. This project provides both a simple command-line interface and a TUI (Terminal User Interface) for quick file transfers between devices.
+
+## Features
+
+- File sending and receiving
+- Cross-platform support (Windows, Linux, macOS)
+- Clean TUI interface
+- Text and file transfer support
+- Automatic device discovery
+- Multi-language support
 
 ## Documentation
 
@@ -16,86 +29,119 @@ The following documentation is for version v1.2.0.
 
 ## Installation
 
-### Arch Linux
+### Package Manager
+
+#### Arch Linux
+> ⚠️ Note: The arch package is still on version 1.1.0
 
 ```bash
 yay -Syy
 yay -S localsend-go
 ```
 
-> 😊 Alternatively, download the executable file from the Release section. Find the one for your platform.
+### Build from Source
 
-### Prerequisites
+1. Ensure Go 1.22 or higher is installed
+2. Clone the repository
+   ```bash
+   git clone https://github.com/meowrain/localsend_cli.git
+   cd localsend_cli
+   ```
 
-- [Go](https://golang.org/dl/) 1.16 or later
+3. Build
+   ```bash
+   make build
+   ```
 
-### Clone the Repository
-
-```sh
-git clone https://github.com/meowrain/localsend_cli.git
-cd localsend_cli
-```
-
-### Build
-
-Use the `Makefile` to build the program.
-
-```sh
-make build
-```
-
-This will generate binaries for all supported platforms and store them in the `bin` directory.
+The compiled binaries will be saved in the `bin` directory.
 
 ## Usage
 
-### Run the Program
+### Basic Usage
 
-On Windows, you can directly double-click the executable.
+<div align="center">
+    <p><b>Main Interface</b></p>
+    <img src="https://blog.meowrain.cn/api/i/2025/02/09/eHAgcd1739113761477122645.avif" width="80%" />
+</div>
 
-![Windows](images/windows.png)
+1. Launch the program
+   - Windows: Double-click the executable or run from command line
+   - Linux/macOS: Run the executable in terminal
 
-Or run:
+2. Select Mode
+   - Use arrow keys to select operation mode (Send/Receive)
+   - Press Enter to confirm
 
-```sh
-.\localsend_cli-windows-amd64.exe
-```
+3. Send Mode
+   - Select file to send
+   - Wait for receiver connection
+   - Confirm transfer
 
-![Version 1.2](images/v1.2.png)
+   <div align="center">
+       <p><b>Send Interface</b></p>
+       <img src="https://blog.meowrain.cn/api/i/2025/02/09/xPUd841739113859215495111.avif" width="80%" />
+       <p><b>Client Confirmation</b></p>
+       <img src="https://blog.meowrain.cn/api/i/2025/02/09/mS1J3k1739113875412020167.avif" width="80%" />
+   </div>
 
-Simply use the keyboard to select the desired mode, and the corresponding mode will automatically start.
+4. Receive Mode
+   - Wait for sender connection
+   - Automatically receive files
+   - Use `Ctrl + C` to end program
 
-![Windows Run](images/windows_run.png)
+   <div align="center">
+       <p><b>Receive Interface</b></p>
+       <img src="https://blog.meowrain.cn/api/i/2025/02/09/OZuXZu1739113816793484432.avif" width="80%" />
+       <p><b>Transfer Complete</b></p>
+       <img src="https://blog.meowrain.cn/api/i/2025/02/09/YjbG9f1739113834583691367.avif" width="80%" />
+   </div>
 
-> In Receive Mode, please use `Ctrl + C` to exit the program after receiving files. Do not close the window directly; on Windows, closing the window does not terminate the program.
+### Special Notes
 
-Run the appropriate binary for your OS and architecture.
-
-On Linux, enable the ping functionality by executing:
-
-```sh
+Linux systems require additional ping permission configuration:
+```bash
 sudo setcap cap_net_raw=+ep localsend_cli
 ```
 
+## Project Structure
+
+```
+.
+├── cmd/          # Main program entry
+├── internal/     # Internal packages
+│   ├── discovery/   # Device discovery
+│   ├── handlers/    # Request handlers
+│   ├── models/      # Data models
+│   └── utils/       # Utility functions
+├── static/       # Static resources
+└── templates/    # Template files
+```
+
+## Development Plan
+
+- [x] Enhanced sending functionality with text display support
+- [x] TUI refresh optimization
+- [ ] Complete internationalization support
+- [x] Transfer progress display improvement
+- [ ] File transfer resume capability
+
 ## Contributing
 
-> Thanks to the contributors below for their support!
+Issues and Pull Requests are welcome. When contributing, please:
 
-> <a href="https://github.com/meowrain/doc-for-sxau/graphs/contributors">
-> <img src="https://contrib.rocks/image?repo=meowrain/localsend-go" />
-> </a>
-
-Feel free to submit issues and pull requests to help improve this project.
+1. Follow Go code conventions
+2. Add necessary tests
+3. Update relevant documentation
+4. Keep code clean and clear
 
 ## License
 
-[MIT](LICENSE)
-
-## Todo
-
-- [x] Improve send functionality: display sent text directly on the recipient device.
-- [ ] Fix TUI refresh issues.
-- [ ] Add internationalization (i18n).
+This project is licensed under the [MIT](../LICENSE) License.
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=meowrain/localsend-go&type=Date)](https://star-history.com/#meowrain/localsend-go&Date)
+<div align="center">
+    <a href="https://star-history.com/#meowrain/localsend-go&Date">
+        <img src="https://api.star-history.com/svg?repos=meowrain/localsend-go&type=Date" width="80%" />
+    </a>
+</div>
