@@ -1,1 +1,2 @@
-bin
+bin/
+!debian/usr/local/bin/
