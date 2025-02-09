@@ -1,0 +1,2 @@
+#!/bin/sh
+chmod 755 /usr/local/bin/localsend-cli 

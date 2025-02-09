@@ -1,0 +1,11 @@
+Package: localsend-cli
+Version: 1.2.2
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: MeowRain meowrain@126.com
+Description: LocalSend CLI - 用于在本地网络中快速传输文件的命令行工具
+ LocalSend是一个跨平台的文件传输工具，
+ 可以在本地网络中快速安全地传输文件。
+ 这是该工具的命令行版本。
+Homepage: https://github.com/meowrain/localsend-go 
