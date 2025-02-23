@@ -345,6 +345,15 @@ func main() {
 		}
 	}()
 
+	// ./localsend <filepath>
+	if len(os.Args) > 1 {
+		err := handlers.SendFile(os.Args[1])
+		if err != nil {
+			logger.Errorf("Send failed: %v", err)
+		}
+		return
+	}
+
 	// Run Bubble Tea program
 	p := bubbletea.NewProgram(initialModel(), bubbletea.WithoutSignalHandler())
 	m, err := p.Run()
