@@ -307,6 +307,108 @@ func (m model) View() string {
 
 	return s.String()
 }
+func WebServerMode(httpServer *http.ServeMux, port int) {
+	err := os.MkdirAll("uploads", 0o755)
+	if err != nil {
+		logger.Errorf("Failed to create uploads directory: %v", err)
+		return
+	}
+	if config.ConfigData.Functions.HttpFileServer {
+		httpServer.HandleFunc("/", handlers.IndexFileHandler)
+		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
+		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
+		httpServer.HandleFunc("/send", handlers.NormalSendHandler) // Upload handler
+	}
+	ips, _ := discovery.GetLocalIP()
+	localIP := ""
+	for _, ip := range ips {
+		ipStr := ip.String()
+		if strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "192.168.") {
+			logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:%d", ip, port))
+		}
+		if strings.HasPrefix(ipStr, "192.168.") {
+			localIP = ip.String()
+		}
+	}
+	qr, err := qrcode.New(fmt.Sprintf("http://%s:%d", localIP, port), qrcode.Highest)
+	if err != nil {
+		fmt.Println("生成二维码失败:", err)
+		return
+	}
+
+	// 打印二维码到终端
+	fmt.Println(qr.ToString(false))
+	select {}
+}
+
+func ReceiveMode() {
+	err := os.MkdirAll("uploads", 0o755)
+	if err != nil {
+		logger.Errorf("Failed to create uploads directory: %v", err)
+		return
+	}
+	discovery.ListenAndStartBroadcasts(nil)
+	logger.Info("Waiting to receive files...")
+	select {}
+}
+func SendMode(filePath string) {
+	err := handlers.SendFile(filePath)
+	if err != nil {
+		logger.Errorf("Send failed: %v", err)
+	}
+}
+func ExitMode() {
+	fmt.Println("Exiting program...")
+	os.Exit(0)
+}
+func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
+	showHelp := func() {
+		fmt.Println("Usage: <command> [arguments]")
+		fmt.Println("Commands:")
+		fmt.Println("  web                 Start Web mode")
+		fmt.Println("  send <file_path>    Start Send mode (file path required)")
+		fmt.Println("  receive             Start Receive mode")
+		fmt.Println("  help                Display this help information")
+		fmt.Println("Options:")
+		fmt.Println("  --help              Display this help information")
+		fmt.Println("  --port=<number>     Specify server port (default: 53317)")
+	}
+	flag.Usage = showHelp
+	// 解析标准flag参数
+	flag.Parse()
+
+	// 检查是否有 --help 参数
+	for _, arg := range os.Args {
+		if arg == "--help" || arg == "-h" {
+			showHelp()
+			ExitMode()
+		}
+	}
+
+	if len(os.Args) > 1 {
+		*flagOpen = true
+		mode := os.Args[1]
+
+		switch mode {
+		case "web":
+			WebServerMode(httpServer, port)
+		case "send":
+			filePath := ""
+			if len(os.Args) > 2 {
+				filePath = os.Args[2]
+				SendMode(filePath)
+			} else {
+				logger.Error("Need file path")
+				ExitMode()
+			}
+		case "receive":
+			ReceiveMode()
+		case "help":
+			showHelp()
+			ExitMode()
+		}
+	}
+}
 
 var port int
 
@@ -315,6 +417,7 @@ func init() {
 }
 
 func main() {
+	var flagOpen bool = false
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -334,6 +437,8 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
 		httpServer.HandleFunc("/api/localsend/v2/cancel", handlers.HandleCancel)
 	}
+	// 参数解析
+	flagParse(httpServer, port, &flagOpen)
 	go func() {
 		logger.Info("Server started at :" + fmt.Sprintf("%d", port))
 		if err := http.ListenAndServe(":"+fmt.Sprintf("%d", port), httpServer); err != nil {
@@ -341,77 +446,35 @@ func main() {
 		}
 	}()
 
-	// Run Bubble Tea program
-	p := bubbletea.NewProgram(initialModel(), bubbletea.WithoutSignalHandler())
-	m, err := p.Run()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	mTyped := m.(model)
-	mode := mTyped.mode
-
-	if mode == "❌ Exit" {
-		fmt.Println("Exiting program...")
-		os.Exit(0)
-	}
-
-	if mode == "📤 Send" {
-		filePath := mTyped.textInput.Value()
-		if filePath == "" {
-			fmt.Println("Send mode requires a file path")
-			os.Exit(1)
-		}
-
-		logger.InitLogger()
-		err := handlers.SendFile(filePath)
+	if !flagOpen {
+		// Run Bubble Tea program
+		p := bubbletea.NewProgram(initialModel(), bubbletea.WithoutSignalHandler())
+		m, err := p.Run()
 		if err != nil {
-			logger.Errorf("Send failed: %v", err)
+			log.Fatal(err)
 		}
-	}
 
-	if mode == "📥 Receive" {
-		err = os.MkdirAll("uploads", 0o755)
-		if err != nil {
-			logger.Errorf("Failed to create uploads directory: %v", err)
-			return
-		}
-		discovery.ListenAndStartBroadcasts(nil)
-		logger.Info("Waiting to receive files...")
-		select {}
+		mTyped := m.(model)
+		mode := mTyped.mode
 
-	}
-	if mode == "🌎 Web" {
-		err = os.MkdirAll("uploads", 0o755)
-		if err != nil {
-			logger.Errorf("Failed to create uploads directory: %v", err)
-			return
+		if mode == "❌ Exit" {
+			ExitMode()
 		}
-		if config.ConfigData.Functions.HttpFileServer {
-			httpServer.HandleFunc("/", handlers.IndexFileHandler)
-			httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
-			httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
-			httpServer.HandleFunc("/send", handlers.NormalSendHandler) // Upload handler
-		}
-		ips, _ := discovery.GetLocalIP()
-		localIP := ""
-		for _, ip := range ips {
-			ipStr := ip.String()
-			if strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "192.168.") {
-				logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:%d", ip, port))
+
+		if mode == "📤 Send" {
+			filePath := mTyped.textInput.Value()
+			if filePath == "" {
+				fmt.Println("Send mode requires a file path")
+				os.Exit(1)
 			}
-			if strings.HasPrefix(ipStr, "192.168.") {
-				localIP = ip.String()
-			}
-		}
-		qr, err := qrcode.New(fmt.Sprintf("http://%s:%d", localIP, port), qrcode.Highest)
-		if err != nil {
-			fmt.Println("生成二维码失败:", err)
-			return
+			SendMode(filePath)
 		}
 
-		// 打印二维码到终端
-		fmt.Println(qr.ToString(false))
-		select {}
+		if mode == "📥 Receive" {
+			ReceiveMode()
+		}
+		if mode == "🌎 Web" {
+			WebServerMode(httpServer, port)
+		}
 	}
 }

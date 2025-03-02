@@ -3,7 +3,7 @@ package config
 import (
 	"embed"
 	"fmt"
-	"log"
+	"localsend_cli/internal/utils/logger"
 	"math/rand"
 	"os"
 	"time"
@@ -47,15 +47,15 @@ func generateRandomName() string {
 func init() {
 	bytes, err := os.ReadFile("internal/config/config.yaml")
 	if err != nil {
-		log.Println("读取外部配置文件失败，使用内置配置")
+		logger.Debug("读取外部配置文件失败，使用内置配置")
 		bytes, err = embeddedConfig.ReadFile("config.yaml")
 		if err != nil {
-			log.Fatalf("无法读取嵌入式配置文件: %v", err)
+			logger.Failedf("无法读取嵌入式配置文件: %v", err)
 		}
 	}
 
 	if err := yaml.Unmarshal(bytes, &ConfigData); err != nil {
-		log.Fatalf("解析配置文件出错: %v", err)
+		logger.Failedf("解析配置文件出错: %v", err)
 	}
 
 	ConfigData.NameOfDevice = generateRandomName()
