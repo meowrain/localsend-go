@@ -279,7 +279,7 @@ func SendFile(path string) error {
 }
 
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Handling upload request...") // Debug log - request start
+	logger.Info("Handling upload request...") // Debug log - request start
 
 	// 限制表单数据大小（此处设置为 10 MB，可根据需要调整）
 	if err := r.ParseMultipartForm(10 << 20); err != nil {
@@ -289,7 +289,7 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 获取上传的目录名 (来自前端 hidden input)
 	uploadedDirName := r.FormValue("directoryName")
-	fmt.Printf("directoryName from form: '%s'\n", uploadedDirName) // Debug log - directoryName value
+	logger.Debugf("directoryName from form: '%s'\n", uploadedDirName) // Debug log - directoryName value
 
 	// 获取所有上传的文件
 	files := r.MultipartForm.File["file"]
@@ -305,9 +305,9 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 	if uploadedDirName != "" {
 		finalUploadDir = filepath.Join(uploadDir, uploadedDirName)
 	} else {
-		fmt.Println("No directoryName provided, uploading to root uploads dir.") // Debug log - no directoryName
+		logger.Debug("No directoryName provided, uploading to root uploads dir.") // Debug log - no directoryName
 	}
-	fmt.Printf("Final upload directory: '%s'\n", finalUploadDir) // Debug log - final upload directory
+	logger.Debugf("Final upload directory: '%s'\n", finalUploadDir)
 
 	// 创建最终的上传目录（如果不存在）
 	if err := os.MkdirAll(finalUploadDir, os.ModePerm); err != nil {
@@ -327,7 +327,7 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 
 		// 拼接目标路径 (使用 finalUploadDir 作为根目录)
 		destPath := filepath.Join(finalUploadDir, fileHeader.Filename)
-		fmt.Printf("Saving file '%s' to destPath: '%s'\n", fileHeader.Filename, destPath) // Debug log - file dest path
+		logger.Infof("Saving file '%s' to destPath: '%s'\n", fileHeader.Filename, destPath) // Debug log - file dest path
 
 		// 创建目标目录（如果不存在）
 		if err := os.MkdirAll(filepath.Dir(destPath), os.ModePerm); err != nil {
@@ -352,5 +352,4 @@ func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintf(w, "文件上传成功，共计 %d 个文件，上传到目录: %s\n", len(files), finalUploadDir)
-	fmt.Println("Upload request finished successfully.") // Debug log - request finish
 }

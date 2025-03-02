@@ -20,6 +20,7 @@ import (
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 type textInputModel struct {
@@ -148,7 +149,7 @@ type model struct {
 func initialModel() model {
 	return model{
 		mode:      "",
-		choices:   []string{"📤 Send", "📥 Receive", "❌ Exit"},
+		choices:   []string{"📤 Send", "📥 Receive", "🌎 Web", "❌ Exit"},
 		cursor:    0,
 		textInput: initialTextInputModel(),
 	}
@@ -325,12 +326,7 @@ func main() {
 
 	// Start HTTP server
 	httpServer := server.New()
-	if config.ConfigData.Functions.HttpFileServer {
-		httpServer.HandleFunc("/", handlers.IndexFileHandler)
-		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
-		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
-		httpServer.HandleFunc("/send", handlers.NormalSendHandler) // Upload handler
-	}
+
 	/* Send and receive section */
 	if config.ConfigData.Functions.LocalSendServer {
 		httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
@@ -344,15 +340,6 @@ func main() {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
-
-	// ./localsend <filepath>
-	if len(os.Args) > 1 {
-		err := handlers.SendFile(os.Args[1])
-		if err != nil {
-			logger.Errorf("Send failed: %v", err)
-		}
-		return
-	}
 
 	// Run Bubble Tea program
 	p := bubbletea.NewProgram(initialModel(), bubbletea.WithoutSignalHandler())
@@ -391,16 +378,40 @@ func main() {
 		}
 		discovery.ListenAndStartBroadcasts(nil)
 		logger.Info("Waiting to receive files...")
-		ips, _ := discovery.GetLocalIP()
-
-		for _, ip := range ips {
-			ipStr := ip.String()
-			if strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "192.168.") || (strings.HasPrefix(ipStr, "172.") && len(ipStr) >= 7 && ipStr[4] >= '1' && ipStr[4] <= '6') {
-				logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:%d", ip, port))
-			}
-		}
-
 		select {}
 
+	}
+	if mode == "🌎 Web" {
+		err = os.MkdirAll("uploads", 0o755)
+		if err != nil {
+			logger.Errorf("Failed to create uploads directory: %v", err)
+			return
+		}
+		if config.ConfigData.Functions.HttpFileServer {
+			httpServer.HandleFunc("/", handlers.IndexFileHandler)
+			httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
+			httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
+			httpServer.HandleFunc("/send", handlers.NormalSendHandler) // Upload handler
+		}
+		ips, _ := discovery.GetLocalIP()
+		localIP := ""
+		for _, ip := range ips {
+			ipStr := ip.String()
+			if strings.HasPrefix(ipStr, "10.") || strings.HasPrefix(ipStr, "192.168.") {
+				logger.Infof("If you opened the HTTP file server, you can view your files on %s", fmt.Sprintf("http://%v:%d", ip, port))
+			}
+			if strings.HasPrefix(ipStr, "192.168.") {
+				localIP = ip.String()
+			}
+		}
+		qr, err := qrcode.New(fmt.Sprintf("http://%s:%d", localIP, port), qrcode.Highest)
+		if err != nil {
+			fmt.Println("生成二维码失败:", err)
+			return
+		}
+
+		// 打印二维码到终端
+		fmt.Println(qr.ToString(false))
+		select {}
 	}
 }
