@@ -437,14 +437,14 @@ func main() {
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
 		httpServer.HandleFunc("/api/localsend/v2/cancel", handlers.HandleCancel)
 	}
-	// 参数解析
-	flagParse(httpServer, port, &flagOpen)
 	go func() {
 		logger.Info("Server started at :" + fmt.Sprintf("%d", port))
 		if err := http.ListenAndServe(":"+fmt.Sprintf("%d", port), httpServer); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
+	// 参数解析
+	flagParse(httpServer, port, &flagOpen)
 
 	if !flagOpen {
 		// Run Bubble Tea program
