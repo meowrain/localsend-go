@@ -98,19 +98,44 @@ func StartUDPBroadcast() {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
+	const maxFailCount = 3 // 最大失败次数
+	failCount := 0         // 失败计数器
+
+	refreshConnection := func() {
+		conn.Close()
+		conn, err = net.DialUDP("udp", nil, addr)
+		if err != nil {
+			logger.Errorf("Failed to refresh UDP connection: %v", err)
+			return
+		}
+	}
+
 	for range ticker.C {
 		data, err := json.Marshal(shared.Message)
 		if err != nil {
 			logger.Errorf("Failed to marshal broadcast message: %v", err)
+			failCount++
+			if failCount >= maxFailCount {
+				logger.Info("Refreshing UDP connection due to consecutive failures")
+				refreshConnection()
+				failCount = 0 // 重置失败计数器
+			}
 			continue
 		}
 
 		_, err = conn.Write(data)
 		if err != nil {
 			logger.Errorf("Failed to send UDP broadcast: %v", err)
+			failCount++
+			if failCount >= maxFailCount {
+				logger.Info("Refreshing UDP connection due to consecutive failures")
+				refreshConnection()
+				failCount = 0 // 重置失败计数器
+			}
 			continue
 		}
 
 		logger.Debug("Sent UDP broadcast")
+		failCount = 0 // 成功发送后重置失败计数器
 	}
 }
