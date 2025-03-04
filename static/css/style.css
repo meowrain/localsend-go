@@ -1,194 +1,764 @@
-/* 定义全局颜色和字体变量 */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
 :root {
-  --primary-color: #007bff;
-  --secondary-color: #00d4ff;
-  --success-color: #28a745;
-  --hover-primary: #0069d9;
-  --hover-secondary: #00bcd4;
-  --hover-success: #218838;
-  --font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  --bg-gradient-start: #f6f8fa;
-  --bg-gradient-end: #e9ecef;
+  --primary-color: #4361ee;
+  --primary-hover: #3a56d4;
+  --secondary-color: #4cc9f0;
+  --success-color: #06d6a0;
+  --danger-color: #ef476f;
+  --warning-color: #ffd166;
+  --text-dark: #2b2d42;
+  --text-light: #8d99ae;
+  --bg-light: #f8f9fa;
+  --bg-dark: #212529;
+  --card-bg: #ffffff;
+  --card-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+  --border-radius: 12px;
+  --transition-fast: 0.2s ease;
+  --transition-standard: 0.3s ease;
 }
 
-/* 全局基础样式 */
-body {
-  font-family: var(--font-family);
-  background: linear-gradient(
-    135deg,
-    var(--bg-gradient-start) 0%,
-    var(--bg-gradient-end) 100%
-  );
+* {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-light);
+  color: var(--text-dark);
+  line-height: 1.6;
   min-height: 100vh;
-}
-
-/* 主容器 */
-.container {
-  background-color: #fff;
-  padding: 30px 50px;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 800px;
-  box-sizing: border-box;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
-  box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.02);
-}
-
-/* 标题样式 */
-h1 {
-  color: #333;
-  text-align: center;
-  margin-bottom: 40px;
-  font-size: 2.2em;
-  font-weight: 600;
-  letter-spacing: -0.02em;
   position: relative;
-  padding-bottom: 20px;
+  overflow-x: hidden;
+  padding-bottom: 3rem;
 }
 
-h1::after {
-  content: "";
+/* Background animated pattern */
+.bg-pattern {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  background: linear-gradient(120deg, rgba(67, 97, 238, 0.05), rgba(76, 201, 240, 0.05));
+  background-size: 400% 400%;
+  animation: gradientAnimation 15s ease infinite;
+}
+
+@keyframes gradientAnimation {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.container {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  animation: fadeIn 0.5s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.card {
+  background-color: var(--card-bg);
+  border-radius: var(--border-radius);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+  transition: transform var(--transition-standard), box-shadow var(--transition-standard);
+  margin-bottom: 2rem;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+}
+
+.card-header {
+  padding: 1.5rem;
+  background: linear-gradient(120deg, var(--primary-color), var(--secondary-color));
+  position: relative;
+}
+
+.card-title {
+  color: white;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.card-body {
+  padding: 1.5rem;
+}
+
+/* Form elements */
+.upload-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-group {
+  margin-bottom: 0.5rem;
+}
+
+.upload-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.9rem 1.5rem;
+  background-color: var(--primary-color);
+  color: white;
+  font-weight: 500;
+  border-radius: var(--border-radius);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: none;
+  box-shadow: 0 4px 6px rgba(67, 97, 238, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-button::after {
+  content: '';
   position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.upload-button:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(67, 97, 238, 0.3);
+}
+
+.upload-button:hover::after {
+  opacity: 1;
+}
+
+.upload-button:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(67, 97, 238, 0.2);
+}
+
+.upload-button i {
+  margin-right: 8px;
+  font-size: 1.1rem;
+}
+
+.upload-input {
+  display: none;
+}
+
+#uploadButton {
+  display: block;
+  width: 100%;
+  padding: 0.9rem;
+  background-color: var(--success-color);
+  color: white;
+  font-weight: 500;
+  border: none;
+  border-radius: var(--border-radius);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 4px 6px rgba(6, 214, 160, 0.2);
+  position: relative;
+  overflow: hidden;
+}
+
+#uploadButton::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+#uploadButton:hover {
+  background-color: #05bb8a;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 12px rgba(6, 214, 160, 0.3);
+}
+
+#uploadButton:hover::after {
+  opacity: 1;
+}
+
+#uploadButton:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(6, 214, 160, 0.2);
+}
+
+/* Progress indicator */
+.progress-container {
+  width: 100%;
+  background: #e9ecef;
+  border-radius: 30px;
+  overflow: hidden;
+  height: 8px;
+  display: none;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+  border-radius: 30px;
+  transition: width 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
   bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 60px;
-  height: 3px;
   background: linear-gradient(
     90deg,
-    var(--primary-color) 0%,
-    var(--secondary-color) 100%
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
   );
-  border-radius: 2px;
+  animation: progressShine 1.5s infinite linear;
 }
 
-/* 列表样式 */
-ul {
+@keyframes progressShine {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Loading indicator */
+.loading-indicator {
+  display: none;
+  margin: 1rem 0;
+  text-align: center;
+  color: var(--text-light);
+  font-size: 0.9rem;
+  animation: fadeIn 0.3s;
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(76, 201, 240, 0.2);
+  border-radius: 50%;
+  border-top-color: var(--secondary-color);
+  animation: spin 1s cubic-bezier(0.645, 0.045, 0.355, 1) infinite;
+  margin-right: 10px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* File list styling */
+.files-container {
+  animation: slideUp 0.5s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.files-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid rgba(141, 153, 174, 0.2);
+}
+
+.files-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text-dark);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-title i {
+  color: var(--primary-color);
+}
+
+.file-list {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
-li {
-  margin: 12px 0;
-  padding: 16px 20px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(0, 0, 0, 0.05);
+.file-list li {
+  border-bottom: 1px solid rgba(141, 153, 174, 0.1);
+  transition: all var(--transition-fast);
+  animation: fadeInUp 0.4s both;
+}
+
+.file-list li:last-child {
+  border-bottom: none;
+}
+
+.file-list li:nth-child(1) { animation-delay: 0.05s; }
+.file-list li:nth-child(2) { animation-delay: 0.1s; }
+.file-list li:nth-child(3) { animation-delay: 0.15s; }
+.file-list li:nth-child(4) { animation-delay: 0.2s; }
+.file-list li:nth-child(5) { animation-delay: 0.25s; }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.file-list a {
   display: flex;
   align-items: center;
-  gap: 12px;
-  transition: all 0.3s ease;
+  color: var(--text-dark);
+  text-decoration: none;
+  padding: 1rem 0.5rem;
+  transition: all var(--transition-fast);
+}
+
+.file-list a:hover {
+  color: var(--primary-color);
+  background-color: rgba(67, 97, 238, 0.05);
+  transform: translateX(5px);
+}
+
+.file-list i {
+  margin-right: 12px;
+  font-size: 1.1rem;
+}
+
+.file-list i.fa-folder {
+  color: var(--warning-color);
+}
+
+.file-list i.fa-file {
+  color: var(--text-light);
+}
+
+/* Empty state */
+.empty-state {
+  padding: 3rem 1.5rem;
+  text-align: center;
+  color: var(--text-light);
+}
+
+.empty-state i {
+  font-size: 3rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.3;
+}
+
+.empty-state p {
+  font-size: 1.1rem;
+  margin-bottom: 0;
+}
+
+/* Modal styling */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(33, 37, 41, 0.7);
+  z-index: 1000;
+  justify-content: center;
+  align-items: center;
+  backdrop-filter: blur(5px);
+}
+
+.modal-content {
+  background-color: var(--card-bg);
+  padding: 2.5rem;
+  border-radius: var(--border-radius);
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  position: relative;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.modal.show .modal-content {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.modal-icon {
+  font-size: 3.5rem;
+  margin-bottom: 1.5rem;
+  transform: scale(0);
+  animation: popIn 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards 0.2s;
+}
+
+@keyframes popIn {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
+.modal-icon.success {
+  color: var(--success-color);
+}
+
+.modal-icon.error {
+  color: var(--danger-color);
+}
+
+.modal-title {
+  font-size: 1.5rem;
+  margin-bottom: 0.75rem;
+  color: var(--text-dark);
+  font-weight: 600;
+  opacity: 0;
+  transform: translateY(-20px);
+  animation: slideDown 0.4s ease forwards 0.3s;
+}
+
+.modal-message {
+  margin-bottom: 2rem;
+  color: var(--text-light);
+  opacity: 0;
+  transform: translateY(-15px);
+  animation: slideDown 0.4s ease forwards 0.4s;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.modal-button {
+  padding: 0.8rem 2rem;
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: 30px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: 0 4px 10px rgba(67, 97, 238, 0.2);
+  opacity: 0;
+  transform: translateY(15px);
+  animation: slideUp 0.4s ease forwards 0.5s;
+}
+
+.modal-button:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(67, 97, 238, 0.3);
+}
+
+.close-modal {
+  position: absolute;
+  top: 15px;
+  right: 20px;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: var(--text-light);
+  transition: color var(--transition-fast);
+  opacity: 0;
+  animation: fadeIn 0.3s ease forwards 0.6s;
+}
+
+.close-modal:hover {
+  color: var(--text-dark);
+}
+
+.disabled {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .container {
+    padding: 1rem;
+    margin: 1rem auto;
+  }
+  
+  .card-header {
+    padding: 1.25rem;
+  }
+  
+  .card-body {
+    padding: 1.25rem;
+  }
+  
+  .upload-buttons {
+    flex-direction: column;
+  }
+  
+  .upload-button {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .modal-content {
+    padding: 2rem 1.5rem;
+  }
+}
+
+/* Floating back to top button */
+.back-to-top {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: var(--primary-color);
+  color: white;
+  width: 45px;
+  height: 45px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%;
+  opacity: 0;
+  visibility: hidden;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  transition: all var(--transition-standard);
+  transform: translateY(20px);
+  cursor: pointer;
+  z-index: 99;
+}
+
+.back-to-top.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.back-to-top:hover {
+  background-color: var(--primary-hover);
+  transform: translateY(-5px);
+}
+
+/* Animations for page transitions */
+.page-transition {
+  animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Add drag and drop styles */
+.drop-area {
+  border: 2px dashed var(--text-light);
+  border-radius: var(--border-radius);
+  padding: 2rem;
+  text-align: center;
+  margin-bottom: 1.5rem;
+  transition: all var(--transition-standard);
+  background-color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
 }
 
-li:hover {
-  background: #fff;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
+.drop-area.highlight {
+  border-color: var(--primary-color);
+  background-color: rgba(67, 97, 238, 0.05);
+  transform: scale(1.02);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
 }
 
-/* 链接样式 */
-a {
-  text-decoration: none;
-  color: var(--primary-color);
-  font-weight: bold;
-}
-
-a:hover {
-  text-decoration: underline;
-}
-
-/* 表单样式 */
-.upload-form {
-  margin-bottom: 40px;
+.drop-area-content {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  align-items: center;
+  gap: 0.5rem;
 }
 
-/* 隐藏默认文件输入框 */
-.upload-form input[type="file"] {
+.drop-area-content i {
+  font-size: 3rem;
+  color: var(--primary-color);
+  margin-bottom: 0.5rem;
+  opacity: 0.8;
+}
+
+.drop-area-content h3 {
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--text-dark);
+  margin: 0;
+}
+
+.drop-area-content p {
+  color: var(--text-light);
+  margin: 0;
+}
+
+/* Files preview section */
+.files-preview {
   display: none;
+  margin-bottom: 1.5rem;
+  animation: fadeIn 0.3s ease;
 }
 
-/* 自定义文件选择按钮 */
-.upload-form label {
-  background: linear-gradient(
-    135deg,
-    var(--primary-color),
-    var(--secondary-color)
-  );
-  color: #fff;
-  padding: 12px 24px;
-  border-radius: 8px;
-  text-align: center;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+.file-preview-list {
+  border-radius: var(--border-radius);
+  overflow: hidden;
+  background-color: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(141, 153, 174, 0.2);
 }
 
-.upload-form label:hover {
-  background: linear-gradient(
-    135deg,
-    var(--hover-primary),
-    var(--hover-secondary)
-  );
-  box-shadow: 0 6px 16px rgba(0, 123, 255, 0.3);
-}
-
-/* 上传按钮 */
-.upload-form button {
-  background: linear-gradient(135deg, var(--success-color), #20c997);
-  color: #fff;
-  padding: 12px 24px;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
-}
-
-.upload-form button:hover {
-  background: linear-gradient(135deg, var(--hover-success), #1aa179);
-  box-shadow: 0 6px 16px rgba(40, 167, 69, 0.3);
-}
-
-/* 新增：上传按钮组样式 */
-.upload-buttons {
+.file-preview-item {
   display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  justify-content: center;
-  margin-bottom: 20px;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(141, 153, 174, 0.1);
+  animation: slideIn 0.3s ease;
+  position: relative;
 }
-.upload-button {
-  display: inline-block;
-  padding: 12px 24px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #007bff, #00d4ff);
-  color: #fff;
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.file-preview-item:last-child {
+  border-bottom: none;
+}
+
+.file-preview-item i {
+  font-size: 1.2rem;
+  margin-right: 1rem;
+  color: var(--primary-color);
+}
+
+.file-preview-item .file-info {
+  flex: 1;
+  overflow: hidden;
+}
+
+.file-preview-item .file-name {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
-  text-align: center;
+  color: var(--text-dark);
+}
+
+.file-preview-item .file-size {
+  font-size: 0.8rem;
+  color: var(--text-light);
+}
+
+.remove-file-btn {
+  background: none;
+  border: none;
+  color: var(--text-light);
   cursor: pointer;
-  transition: background 0.3s ease, transform 0.3s ease;
-  box-shadow: 0 4px 12px rgba(0, 123, 255, 0.2);
+  font-size: 1rem;
+  padding: 0.25rem;
+  border-radius: 50%;
+  width: 25px;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
 }
-.upload-button:hover {
-  background: linear-gradient(135deg, #0069d9, #00bcd4);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 123, 255, 0.3);
+
+.remove-file-btn:hover {
+  background-color: rgba(239, 71, 111, 0.1);
+  color: var(--danger-color);
 }
-/* 隐藏真实文件输入框 */
-.upload-input {
-  display: none;
+
+.clear-all-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: none;
+  border: none;
+  color: var(--text-light);
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  border-radius: var(--border-radius);
+  transition: all var(--transition-fast);
+}
+
+.clear-all-btn:hover {
+  color: var(--danger-color);
+  background-color: rgba(239, 71, 111, 0.05);
+}
+
+/* Button ripple effect */
+button {
+  position: relative;
+  overflow: hidden;
+}
+
+.ripple {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  transform: scale(0);
+  animation: ripple 0.6s linear;
+  pointer-events: none;
+}
+
+@keyframes ripple {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+
+/* Pulse animation for buttons */
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.pulse {
+  animation: pulse 0.5s;
+}
+
+.fade-in {
+  animation: fadeIn 0.5s;
+}
+
+/* Disabled state for upload button */
+#uploadButton:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
 }

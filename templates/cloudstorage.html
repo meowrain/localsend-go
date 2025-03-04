@@ -3,166 +3,565 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Uploads</title>
+    <title>LocalSendGo - File Transfer</title>
     <link href="/static/css/style.css" rel="stylesheet" />
-    <style>
-      /* 进度条容器样式 */
-      .progress-container {
-        width: 100%;
-        background: #e0e0e0;
-        border-radius: 8px;
-        overflow: hidden;
-        margin-top: 10px;
-        height: 20px;
-        display: none; /* 默认隐藏，上传时显示 */
-      }
-      .progress-bar {
-        height: 100%;
-        width: 0%;
-        background: linear-gradient(135deg, #28a745, #20c997);
-        transition: width 0.2s ease;
-      }
-    </style>
+    <link rel="stylesheet" href="/static/fontawesome/css/all.min.css">
+    <!-- Add favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📤</text></svg>">
   </head>
   <body>
+    <!-- Animated background pattern -->
+    <div class="bg-pattern"></div>
+    
     <div class="container">
-      <h1>Uploads</h1>
-      <!-- 文件上传表单 -->
-      <form class="upload-form" id="uploadForm">
-        <!-- 上传按钮组 -->
-        <div class="upload-buttons">
-          <label for="file-input" class="upload-button">选择文件</label>
-          <input
-            id="file-input"
-            class="upload-input"
-            type="file"
-            name="file"
-            multiple
-          />
-          <label for="folder-input" class="upload-button">选择文件夹</label>
-          <input
-            id="folder-input"
-            class="upload-input"
-            type="file"
-            name="file"
-            webkitdirectory
-            multiple
-          />
+      <div class="card">
+        <div class="card-header">
+          <h1 class="card-title">LocalSendGo</h1>
         </div>
-        <!-- 进度条 -->
-        <div class="progress-container" id="progressContainer">
-          <div class="progress-bar" id="progressBar"></div>
+        <div class="card-body">
+          <!-- File upload form with drag & drop area -->
+          <form class="upload-form" id="uploadForm">
+            <!-- Add drag and drop area -->
+            <div class="drop-area" id="dropArea">
+              <div class="drop-area-content">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <h3>Drag & Drop Files Here</h3>
+                <p>or use the buttons below</p>
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <div class="upload-buttons">
+                <label for="file-input" class="upload-button">
+                  <i class="fas fa-file-upload"></i> Select Files
+                </label>
+                <input
+                  id="file-input"
+                  class="upload-input"
+                  type="file"
+                  name="file"
+                  multiple
+                />
+                <label for="folder-input" class="upload-button">
+                  <i class="fas fa-folder-open"></i> Select Folder
+                </label>
+                <input
+                  id="folder-input"
+                  class="upload-input"
+                  type="file"
+                  name="file"
+                  webkitdirectory
+                  multiple
+                />
+              </div>
+            </div>
+            
+            <!-- Files preview container -->
+            <div class="files-preview" id="filesPreview"></div>
+            
+            <!-- Loading indicator -->
+            <div class="loading-indicator" id="loadingIndicator">
+              <div class="loading-spinner"></div>
+              <span id="loadingText">Preparing files...</span>
+            </div>
+            
+            <!-- Progress bar -->
+            <div class="progress-container" id="progressContainer">
+              <div class="progress-bar" id="progressBar"></div>
+            </div>
+            
+            <!-- Upload button -->
+            <button type="submit" id="uploadButton">
+              <i class="fas fa-cloud-upload-alt"></i> Upload
+            </button>
+            <input type="hidden" id="directoryName" name="directoryName" value="" />
+          </form>
         </div>
-        <!-- 上传按钮 -->
-        <button type="submit">上传</button>
-        <input type="hidden" id="directoryName" name="directoryName" value="" />
-        <!-- Hidden input for directory name -->
-      </form>
+      </div>
 
-      <!-- 显示服务器上文件列表（例如目录下的文件、文件夹） -->
-      <ul>
-        {{range .Files}}
-        <li>
-          {{if .IsDir}}
-          <a href="{{$.Path}}{{.Name}}/">{{.Name}}/</a>
+      <!-- File list card -->
+      <div class="card files-container">
+        <div class="card-body">
+          <div class="files-header">
+            <div class="files-title">
+              <i class="fas fa-folder-open"></i> Files
+            </div>
+          </div>
+          
+          {{if .Files}}
+          <ul class="file-list">
+            {{range .Files}}
+            <li>
+              {{if .IsDir}}
+              <a href="{{$.Path}}{{.Name}}/">
+                <i class="fas fa-folder"></i> {{.Name}}
+              </a>
+              {{else}}
+              <a href="{{$.Path}}{{.Name}}">
+                <i class="fas fa-file"></i> {{.Name}}
+              </a>
+              {{end}}
+            </li>
+            {{end}}
+          </ul>
           {{else}}
-          <a href="{{$.Path}}{{.Name}}">{{.Name}}</a>
+          <div class="empty-state">
+            <i class="fas fa-inbox"></i>
+            <p>No files available. Upload some files to get started.</p>
+          </div>
           {{end}}
-        </li>
-        {{end}}
-      </ul>
+        </div>
+      </div>
     </div>
+
+    <!-- Back to top button -->
+    <div class="back-to-top" id="backToTop">
+      <i class="fas fa-arrow-up"></i>
+    </div>
+
+    <!-- Modal for notifications with animated content -->
+    <div class="modal" id="notificationModal">
+      <div class="modal-content">
+        <span class="close-modal" onclick="closeModal()">&times;</span>
+        <div class="modal-icon success" id="modalIcon">
+          <i class="fas fa-check-circle"></i>
+        </div>
+        <h3 class="modal-title" id="modalTitle">Success</h3>
+        <p class="modal-message" id="modalMessage">Files uploaded successfully!</p>
+        <button class="modal-button" onclick="closeModal()">OK</button>
+      </div>
+    </div>
+
     <script>
-      // 更新选择文件按钮的文本
-      document
-        .getElementById("file-input")
-        .addEventListener("change", function (e) {
-          const files = e.target.files;
-          const label = document.querySelector("label[for='file-input']");
-          if (files.length > 0) {
-            label.textContent =
-              files.length === 1
-                ? `已选择: ${files[0].name}`
-                : `已选择: ${files.length} 个文件`;
-          } else {
-            label.textContent = "选择文件";
+      // Store all files selected for upload
+      let selectedFiles = [];
+      
+      // Drag and drop functionality
+      const dropArea = document.getElementById('dropArea');
+      const filesPreview = document.getElementById('filesPreview');
+      
+      // Prevent default behaviors for drag events
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+      });
+      
+      function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      
+      // Highlight drop area when item is dragged over it
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropArea.addEventListener(eventName, highlight, false);
+      });
+      
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, unhighlight, false);
+      });
+      
+      function highlight() {
+        dropArea.classList.add('highlight');
+      }
+      
+      function unhighlight() {
+        dropArea.classList.remove('highlight');
+      }
+      
+      // Handle dropped files
+      dropArea.addEventListener('drop', handleDrop, false);
+      
+      function handleDrop(e) {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        
+        if (files.length > 0) {
+          // Add dropped files to the selected files
+          handleFiles(files);
+        }
+      }
+      
+      function handleFiles(files) {
+        const fileArray = Array.from(files);
+        
+        // Add files to the selectedFiles array
+        fileArray.forEach(file => {
+          // Check if file with same name/path already exists
+          const exists = selectedFiles.some(f => 
+            f.name === file.name && 
+            (file.webkitRelativePath ? f.webkitRelativePath === file.webkitRelativePath : true)
+          );
+          
+          if (!exists) {
+            selectedFiles.push(file);
           }
         });
-
-      // 更新选择文件夹按钮的文本 and extract directory name
-      document
-        .getElementById("folder-input")
-        .addEventListener("change", function (e) {
-          const files = e.target.files;
-          const label = document.querySelector("label[for='folder-input']");
-          const directoryNameInput = document.getElementById("directoryName");
-          let directoryName = ""; // Default to empty for single file uploads
-
-          if (files.length > 0) {
-            label.textContent =
-              files.length === 1
-                ? `已选择: ${files[0].webkitRelativePath || files[0].name}`
-                : `已选择: ${files.length} 个文件`;
-
-            if (files[0].webkitRelativePath) {
-              const relativePathParts = files[0].webkitRelativePath.split("/");
-              if (relativePathParts.length > 0) {
-                directoryName = relativePathParts[0]; // Extract directory name for folder uploads
-              }
+        
+        // Update the UI with file previews
+        updateFilePreview();
+        
+        // Update the upload button state
+        updateUploadButtonState();
+      }
+      
+      function updateFilePreview() {
+        filesPreview.innerHTML = '';
+        
+        if (selectedFiles.length > 0) {
+          const fileList = document.createElement('div');
+          fileList.className = 'file-preview-list';
+          
+          selectedFiles.forEach((file, index) => {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-preview-item';
+            
+            // Determine icon based on file type
+            let iconClass = 'fa-file';
+            if (file.type.startsWith('image/')) {
+              iconClass = 'fa-file-image';
+            } else if (file.type.startsWith('video/')) {
+              iconClass = 'fa-file-video';
+            } else if (file.type.startsWith('audio/')) {
+              iconClass = 'fa-file-audio';
+            } else if (file.type.startsWith('text/')) {
+              iconClass = 'fa-file-alt';
+            } else if (file.type.includes('pdf')) {
+              iconClass = 'fa-file-pdf';
+            } else if (file.type.includes('zip') || file.type.includes('rar')) {
+              iconClass = 'fa-file-archive';
             }
-          } else {
-            label.textContent = "选择文件夹";
+            
+            const path = file.webkitRelativePath 
+              ? file.webkitRelativePath 
+              : file.name;
+            
+            fileItem.innerHTML = `
+              <i class="fas ${iconClass}"></i>
+              <div class="file-info">
+                <span class="file-name" title="${path}">${file.name}</span>
+                <span class="file-size">${formatFileSize(file.size)}</span>
+              </div>
+              <button class="remove-file-btn" data-index="${index}">
+                <i class="fas fa-times"></i>
+              </button>
+            `;
+            
+            fileList.appendChild(fileItem);
+          });
+          
+          // Add a "Remove All" button
+          if (selectedFiles.length > 1) {
+            const clearAllBtn = document.createElement('button');
+            clearAllBtn.className = 'clear-all-btn';
+            clearAllBtn.innerHTML = '<i class="fas fa-trash-alt"></i> Clear All';
+            clearAllBtn.addEventListener('click', clearAllFiles);
+            
+            filesPreview.appendChild(clearAllBtn);
           }
-          directoryNameInput.value = directoryName; // Set directory name in hidden input
+          
+          filesPreview.appendChild(fileList);
+          
+          // Add event listeners to remove buttons
+          document.querySelectorAll('.remove-file-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+              const index = parseInt(this.dataset.index);
+              selectedFiles.splice(index, 1);
+              updateFilePreview();
+              updateUploadButtonState();
+            });
+          });
+          
+          filesPreview.style.display = 'block';
+        } else {
+          filesPreview.style.display = 'none';
+        }
+      }
+      
+      function clearAllFiles() {
+        selectedFiles = [];
+        updateFilePreview();
+        updateUploadButtonState();
+      }
+      
+      function updateUploadButtonState() {
+        const uploadButton = document.getElementById('uploadButton');
+        if (selectedFiles.length > 0) {
+          uploadButton.disabled = false;
+          uploadButton.innerHTML = `<i class="fas fa-cloud-upload-alt"></i> Upload ${selectedFiles.length} File${selectedFiles.length > 1 ? 's' : ''}`;
+        } else {
+          uploadButton.disabled = true;
+          uploadButton.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Upload';
+        }
+      }
+      
+      // Format file size function (moved here so it can be reused)
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+        else if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+        else return (bytes / 1073741824).toFixed(2) + ' GB';
+      }
+      
+      // Back to top button functionality
+      const backToTopButton = document.getElementById('backToTop');
+      
+      window.addEventListener('scroll', () => {
+        if (window.scrollY > 300) {
+          backToTopButton.classList.add('visible');
+        } else {
+          backToTopButton.classList.remove('visible');
+        }
+      });
+      
+      backToTopButton.addEventListener('click', () => {
+        window.scrollTo({
+          top: 0,
+          behavior: 'smooth'
         });
+      });
+      
+      // Show modal function with animation
+      function showModal(type, title, message) {
+        const modal = document.getElementById('notificationModal');
+        const modalIcon = document.getElementById('modalIcon');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalMessage = document.getElementById('modalMessage');
+        
+        // Set modal content
+        if (type === 'success') {
+          modalIcon.className = 'modal-icon success';
+          modalIcon.innerHTML = '<i class="fas fa-check-circle"></i>';
+        } else {
+          modalIcon.className = 'modal-icon error';
+          modalIcon.innerHTML = '<i class="fas fa-exclamation-circle"></i>';
+        }
+        
+        modalTitle.textContent = title;
+        modalMessage.textContent = message;
+        
+        // Show modal with animation
+        modal.style.display = 'flex';
+        setTimeout(() => {
+          modal.classList.add('show');
+        }, 10);
+      }
+      
+      // Close modal function
+      function closeModal() {
+        const modal = document.getElementById('notificationModal');
+        modal.classList.remove('show');
+        setTimeout(() => {
+          modal.style.display = 'none';
+        }, 300);
+      }
+      
+      // Close modal when clicking outside
+      window.onclick = function(event) {
+        const modal = document.getElementById('notificationModal');
+        if (event.target === modal) {
+          closeModal();
+        }
+      };
 
-      // 处理表单提交：利用 XMLHttpRequest 实现上传进度
-      // 处理表单提交：利用 XMLHttpRequest 实现上传进度
-      document
-        .getElementById("uploadForm")
-        .addEventListener("submit", function (e) {
-          const form = e.target;
-          e.preventDefault(); // 阻止默认表单提交
-          const formData = new FormData(this); // Use FormData constructor with the form
-          const directoryNameInput = document.getElementById("directoryName"); // Get hidden input
+      // File button click animation
+      document.querySelectorAll('.upload-button').forEach(button => {
+        button.addEventListener('click', function() {
+          this.classList.add('clicked');
+          setTimeout(() => {
+            this.classList.remove('clicked');
+          }, 300);
+        });
+      });
 
-          // 显示进度条
-          const progressContainer =
-            document.getElementById("progressContainer");
+      // Handle file input change
+      document.getElementById("file-input").addEventListener("change", function(e) {
+        const files = e.target.files;
+        const label = document.querySelector("label[for='file-input']");
+        
+        if (files.length > 0) {
+          label.innerHTML = files.length === 1
+            ? `<i class="fas fa-file"></i> ${files[0].name}`
+            : `<i class="fas fa-file-alt"></i> ${files.length} files selected`;
+            
+          // Add a subtle animation
+          label.classList.add('pulse');
+          setTimeout(() => {
+            label.classList.remove('pulse');
+          }, 500);
+          
+          // Add files to the selected files
+          handleFiles(files);
+        } else {
+          label.innerHTML = '<i class="fas fa-file-upload"></i> Select Files';
+        }
+      });
+
+      // Handle folder input change
+      document.getElementById("folder-input").addEventListener("change", function(e) {
+        const files = e.target.files;
+        const label = document.querySelector("label[for='folder-input']");
+        const directoryNameInput = document.getElementById("directoryName");
+        let directoryName = "";
+
+        if (files.length > 0) {
+          label.innerHTML = files.length === 1
+            ? `<i class="fas fa-folder"></i> ${files[0].webkitRelativePath || files[0].name}`
+            : `<i class="fas fa-folder"></i> ${files.length} files selected`;
+            
+          // Add a subtle animation
+          label.classList.add('pulse');
+          setTimeout(() => {
+            label.classList.remove('pulse');
+          }, 500);
+
+          if (files[0].webkitRelativePath) {
+            const relativePathParts = files[0].webkitRelativePath.split("/");
+            if (relativePathParts.length > 0) {
+              directoryName = relativePathParts[0];
+            }
+          }
+          
+          // Add files to the selected files
+          handleFiles(files);
+        } else {
+          label.innerHTML = '<i class="fas fa-folder-open"></i> Select Folder';
+        }
+        directoryNameInput.value = directoryName;
+      });
+
+      // Handle form submission
+      document.getElementById("uploadForm").addEventListener("submit", function(e) {
+        e.preventDefault();
+        
+        if (selectedFiles.length === 0) {
+          showModal('error', 'No Files Selected', 'Please select files to upload first.');
+          return;
+        }
+        
+        const form = e.target;
+        const uploadButton = document.getElementById("uploadButton");
+        const loadingIndicator = document.getElementById("loadingIndicator");
+        
+        // Create a ripple effect on button click
+        const createRipple = (event) => {
+          const button = event.currentTarget;
+          const circle = document.createElement("span");
+          const diameter = Math.max(button.clientWidth, button.clientHeight);
+          
+          circle.style.width = circle.style.height = `${diameter}px`;
+          circle.style.left = `${event.clientX - button.offsetLeft - diameter / 2}px`;
+          circle.style.top = `${event.clientY - button.offsetTop - diameter / 2}px`;
+          circle.classList.add("ripple");
+          
+          const ripple = button.querySelector(".ripple");
+          if (ripple) {
+            ripple.remove();
+          }
+          
+          button.appendChild(circle);
+        };
+        
+        createRipple(e);
+        
+        // Disable form and show loading indicator
+        uploadButton.classList.add("disabled");
+        loadingIndicator.style.display = "block";
+        
+        // Use setTimeout to allow the UI to update before starting the heavy operation
+        setTimeout(() => {
+          const formData = new FormData();
+          const directoryNameInput = document.getElementById("directoryName");
+          
+          // Add the directory name
+          if (directoryNameInput.value) {
+            formData.append("directoryName", directoryNameInput.value);
+          }
+          
+          // Add all selected files to the FormData
+          let totalSize = 0;
+          selectedFiles.forEach(file => {
+            formData.append("file", file);
+            totalSize += file.size;
+          });
+          
+          // Update loading indicator with file size info
+          document.getElementById("loadingText").textContent = 
+            `Preparing to upload ${selectedFiles.length} file(s) (${formatFileSize(totalSize)})...`;
+          
+          // Show progress bar
+          const progressContainer = document.getElementById("progressContainer");
           const progressBar = document.getElementById("progressBar");
           progressContainer.style.display = "block";
           progressBar.style.width = "0%";
 
-          // 使用 XMLHttpRequest 实现上传和进度监控
+          // Use XMLHttpRequest for upload with progress monitoring
           const xhr = new XMLHttpRequest();
           xhr.open("POST", "/send", true);
 
-          // 监听上传进度事件
-          xhr.upload.onprogress = function (event) {
+          // Monitor upload progress
+          xhr.upload.onprogress = function(event) {
             if (event.lengthComputable) {
               const percentComplete = (event.loaded / event.total) * 100;
               progressBar.style.width = percentComplete + "%";
+              loadingIndicator.style.display = "none";
             }
           };
 
-          // 上传完成回调
-          xhr.onload = function () {
+          // Handle upload completion
+          xhr.onload = function() {
             if (xhr.status >= 200 && xhr.status < 300) {
-              alert("上传成功！");
-              directoryNameInput.value = ""; // 清空 directoryName 的值
-              form.reset(); // 重置表单
-              window.location.reload();
+              // Show success modal with animation
+              showModal('success', 'Upload Complete', `Successfully uploaded ${selectedFiles.length} file(s) (${formatFileSize(totalSize)}).`);
+              
+              // Reset form state
+              directoryNameInput.value = "";
+              clearAllFiles();
+              
+              // Reset the button labels with animation
+              const fileLabel = document.querySelector("label[for='file-input']");
+              const folderLabel = document.querySelector("label[for='folder-input']");
+              
+              fileLabel.innerHTML = '<i class="fas fa-file-upload"></i> Select Files';
+              folderLabel.innerHTML = '<i class="fas fa-folder-open"></i> Select Folder';
+              
+              // Add fade animation to buttons
+              fileLabel.classList.add('fade-in');
+              folderLabel.classList.add('fade-in');
+              
+              setTimeout(() => {
+                fileLabel.classList.remove('fade-in');
+                folderLabel.classList.remove('fade-in');
+              }, 500);
+              
+              // Reload after a delay
+              setTimeout(() => {
+                window.location.reload();
+              }, 1500);
             } else {
-              alert("上传失败，请重试。");
+              // Show error modal
+              showModal('error', 'Upload Failed', 'There was a problem with your upload. Please try again.');
             }
+            
+            // Reset UI state
+            uploadButton.classList.remove("disabled");
+            loadingIndicator.style.display = "none";
+            progressContainer.style.display = "none";
+            updateUploadButtonState();
           };
 
-          xhr.onerror = function () {
-            alert("上传出错，请检查网络或服务器状态。");
+          xhr.onerror = function() {
+            // Show error modal
+            showModal('error', 'Connection Error', 'Could not connect to the server. Please check your network.');
+            
+            // Reset UI state
+            uploadButton.classList.remove("disabled");
+            loadingIndicator.style.display = "none";
+            progressContainer.style.display = "none";
           };
 
           xhr.send(formData);
-        });
+        }, 50);
+      });
     </script>
   </body>
 </html>
