@@ -20,7 +20,7 @@
 ### 使用go install安装
 
 ```bash
-go install github.com/meowrain/localsend-go
+go install github.com/meowrain/localsend-go@latest
 ```
 
 ### 从包管理器安装 | Install from Package Manager | パッケージマネージャーからインストール
