@@ -11,15 +11,14 @@ import (
 	"strings"
 	"syscall"
 
-	"localsend_cli/internal/config"
-	"localsend_cli/internal/discovery"
-	"localsend_cli/internal/handlers"
-	"localsend_cli/internal/pkg/server"
-	"localsend_cli/internal/utils/logger"
-	"localsend_cli/static"
-
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/meowrain/localsend-go/internal/config"
+	"github.com/meowrain/localsend-go/internal/discovery"
+	"github.com/meowrain/localsend-go/internal/handlers"
+	"github.com/meowrain/localsend-go/internal/pkg/server"
+	"github.com/meowrain/localsend-go/internal/utils/logger"
+	"github.com/meowrain/localsend-go/static"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -307,6 +306,7 @@ func (m model) View() string {
 
 	return s.String()
 }
+
 func WebServerMode(httpServer *http.ServeMux, port int) {
 	err := os.MkdirAll("uploads", 0o755)
 	if err != nil {
@@ -351,16 +351,19 @@ func ReceiveMode() {
 	logger.Info("Waiting to receive files...")
 	select {}
 }
+
 func SendMode(filePath string) {
 	err := handlers.SendFile(filePath)
 	if err != nil {
 		logger.Errorf("Send failed: %v", err)
 	}
 }
+
 func ExitMode() {
 	fmt.Println("Exiting program...")
 	os.Exit(0)
 }
+
 func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 	showHelp := func() {
 		fmt.Println("Usage: <command> [arguments]")

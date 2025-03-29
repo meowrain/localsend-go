@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils/clipboard"
-	"localsend_cli/internal/utils/logger"
+	"github.com/meowrain/localsend-go/internal/models"
 
+	"github.com/meowrain/localsend-go/internal/utils/clipboard"
+	"github.com/meowrain/localsend-go/internal/utils/logger"
 	"github.com/schollz/progressbar/v3"
 )
 

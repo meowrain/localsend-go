@@ -3,8 +3,9 @@ package discovery
 import (
 	"time"
 
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils/logger"
+	"github.com/meowrain/localsend-go/internal/utils/logger"
+
+	"github.com/meowrain/localsend-go/internal/models"
 )
 
 const (

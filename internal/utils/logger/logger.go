@@ -99,6 +99,7 @@ func Failedf(format string, args ...interface{}) {
 	checkLogger()
 	logger.Errorf("%s[Failed]%s %s", red, reset, fmt.Sprintf(format, args...))
 }
+
 func Debug(args ...interface{}) {
 	checkLogger()
 	logger.Debug(args...)

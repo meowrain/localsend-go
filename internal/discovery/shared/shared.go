@@ -3,20 +3,20 @@ package shared
 import (
 	"sync"
 
-	"localsend_cli/internal/config"
-	. "localsend_cli/internal/models"
-	"localsend_cli/internal/utils"
+	"github.com/meowrain/localsend-go/internal/config"
+	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/meowrain/localsend-go/internal/utils"
 )
 
 // 全局设备记录哈希表和互斥锁,Message信息
 
 var (
-	DiscoveredDevices = make(map[string]BroadcastMessage)
+	DiscoveredDevices = make(map[string]models.BroadcastMessage)
 	DevicesMutex      sync.RWMutex // 只保留一个互斥锁
 )
 
 // https://github.com/localsend/protocol?tab=readme-ov-file#71-device-type
-var Message = BroadcastMessage{
+var Message = models.BroadcastMessage{
 	Alias:       config.ConfigData.NameOfDevice,
 	Version:     "2.0",
 	DeviceModel: utils.CheckOSType(),

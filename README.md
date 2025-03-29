@@ -17,6 +17,12 @@
 
 ## 快速开始 | Quick Start | クイックスタート
 
+### 使用go install安装
+
+```bash
+go install github.com/meowrain/localsend-go
+```
+
 ### 从包管理器安装 | Install from Package Manager | パッケージマネージャーからインストール
 
 #### Arch Linux

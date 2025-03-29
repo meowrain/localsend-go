@@ -3,11 +3,11 @@ package config
 import (
 	"embed"
 	"fmt"
-	"localsend_cli/internal/utils/logger"
 	"math/rand"
 	"os"
 	"time"
 
+	"github.com/meowrain/localsend-go/internal/utils/logger"
 	"gopkg.in/yaml.v2"
 )
 

@@ -1,9 +1,10 @@
 package handlers
 
 import (
-	"localsend_cli/internal/utils/logger"
 	"net/http"
 	"sync"
+
+	"github.com/meowrain/localsend-go/internal/utils/logger"
 )
 
 var (

@@ -1,9 +1,8 @@
 package clipboard
 
 import (
-	"localsend_cli/internal/utils/logger"
-
 	clipboard "github.com/atotto/clipboard"
+	"github.com/meowrain/localsend-go/internal/utils/logger"
 )
 
 func WriteToClipBoard(text string) {

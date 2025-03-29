@@ -3,11 +3,12 @@ package discovery
 import (
 	"encoding/json"
 	"fmt"
-	"localsend_cli/internal/discovery/shared"
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils/logger"
 	"net"
 	"time"
+
+	"github.com/meowrain/localsend-go/internal/discovery/shared"
+	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/meowrain/localsend-go/internal/utils/logger"
 )
 
 func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {

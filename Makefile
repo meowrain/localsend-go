@@ -1,8 +1,8 @@
 # 项目名
-PROJECT_NAME := localsend_cli
+PROJECT_NAME := localsend_go
 
 # 源代码目录
-SRC_DIR := ./cmd
+SRC_DIR := .
 
 # 输出目录
 OUT_DIR := ./bin

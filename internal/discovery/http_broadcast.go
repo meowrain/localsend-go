@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"localsend_cli/internal/discovery/shared"
-	"localsend_cli/internal/models"
-	"localsend_cli/internal/utils/logger"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/meowrain/localsend-go/internal/discovery/shared"
+	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/meowrain/localsend-go/internal/utils/logger"
 )
 
 func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
