@@ -64,7 +64,7 @@ jobs:
           GOARCH: ${{ steps.platform.outputs.GOARCH }}
         run: |
           mkdir -p ./artifacts
-          go build -o "./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" ./cmd
+          go build -o "./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" .
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
