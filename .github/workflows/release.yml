@@ -64,7 +64,7 @@ jobs:
           GOARCH: ${{ steps.platform.outputs.GOARCH }}
         run: |
           mkdir -p ./artifacts
-          go build -o "./artifacts/localsend_cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" ./cmd
+          go build -o "./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" ./cmd
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
@@ -72,6 +72,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./artifacts/localsend_cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
-          asset_name: localsend_cli-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
+          asset_path: ./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
+          asset_name: localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
           asset_content_type: application/octet-stream
