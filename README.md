@@ -39,6 +39,8 @@ cd localsend_cli
 make build
 ```
 
+
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=meowrain/localsend-go&type=Date)](https://star-history.com/#meowrain/localsend-go&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=meowrain/localsend-go&type=Date)](https://www.star-history.com/#meowrain/localsend-go&Date)
+
