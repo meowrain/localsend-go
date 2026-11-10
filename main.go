@@ -363,28 +363,75 @@ func SendMode(filePath string) {
 	}
 }
 
+// SendTextMode 把文本封装成虚拟 .txt 文件发送，复用 SendFile 的 prepare/upload 流程。
+func SendTextMode(text string) {
+	err := handlers.SendText(text)
+	if err != nil {
+		logger.Errorf("Send failed: %v", err)
+	}
+}
+
+// runSendCommand 统一处理 `send` 子命令的参数解析、校验与分发。
+func runSendCommand(args []string) {
+	opts, err := parseSendOptions(args, os.Stderr)
+	if err != nil {
+		if err == flag.ErrHelp {
+			ExitMode()
+		}
+		fmt.Fprintf(os.Stderr, "send: %v\n", err)
+		sendUsage()
+		os.Exit(1)
+	}
+
+	text, isText, err := opts.resolve(readClipboard)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "send: %v\n", err)
+		sendUsage()
+		os.Exit(1)
+	}
+
+	if isText {
+		SendTextMode(text)
+		return
+	}
+	SendMode(opts.FilePath)
+}
+
+// sendUsage 打印 send 子命令的用法。
+func sendUsage() {
+	fmt.Fprintln(os.Stderr, "Usage: localsend-go send <file_path>")
+	fmt.Fprintln(os.Stderr, "       localsend-go send --text \"<content>\"")
+	fmt.Fprintln(os.Stderr, "       localsend-go send --clipboard")
+}
+
+// showHelp 打印全局帮助信息。
+func showHelp() {
+	fmt.Println("Usage: <command> [arguments]")
+	fmt.Println("Commands:")
+	fmt.Println("  web                 Start Web mode")
+	fmt.Println("  send <file_path>    Send a file or directory")
+	fmt.Println("  send --text <text>  Send a piece of text (as a virtual .txt file)")
+	fmt.Println("  send --clipboard    Send local clipboard content as text")
+	fmt.Println("  receive             Start Receive mode")
+	fmt.Println("  help                Display this help information")
+	fmt.Println("Options:")
+	fmt.Println("  --help              Display this help information")
+	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
+	fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
+	fmt.Println("")
+	fmt.Println("Config lookup order: --config/LOCALSEND_CONFIG > ./config.yaml >")
+	fmt.Println("  user config dir (e.g. ~/.config/localsend-go/config.yaml) >")
+	fmt.Println("  legacy internal/config/config.yaml > embedded defaults")
+	fmt.Println("Notes:")
+	fmt.Println("  send 的 <file_path>、--text、--clipboard 三者互斥，同时给出会报错退出")
+}
+
 func ExitMode() {
 	fmt.Println("Exiting program...")
 	os.Exit(0)
 }
 
 func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
-	showHelp := func() {
-		fmt.Println("Usage: <command> [arguments]")
-		fmt.Println("Commands:")
-		fmt.Println("  web                 Start Web mode")
-		fmt.Println("  send <file_path>    Start Send mode (file path required)")
-		fmt.Println("  receive             Start Receive mode")
-		fmt.Println("  help                Display this help information")
-		fmt.Println("Options:")
-		fmt.Println("  --help              Display this help information")
-		fmt.Println("  --port=<number>     Specify server port (default: 53317)")
-		fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
-		fmt.Println("")
-		fmt.Println("Config lookup order: --config/LOCALSEND_CONFIG > ./config.yaml >")
-		fmt.Println("  user config dir (e.g. ~/.config/localsend-go/config.yaml) >")
-		fmt.Println("  legacy internal/config/config.yaml > embedded defaults")
-	}
 	flag.Usage = showHelp
 	// 解析标准flag参数
 	flag.Parse()
@@ -407,19 +454,16 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		case "web":
 			WebServerMode(httpServer, port)
 		case "send":
-			filePath := ""
-			if len(args) > 1 {
-				filePath = args[1]
-				SendMode(filePath)
-			} else {
-				logger.Error("Need file path")
-				ExitMode()
-			}
+			runSendCommand(os.Args[2:])
 		case "receive":
 			ReceiveMode()
 		case "help":
 			showHelp()
 			ExitMode()
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", mode)
+			showHelp()
+			os.Exit(1)
 		}
 	}
 }

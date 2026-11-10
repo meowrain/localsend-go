@@ -13,3 +13,9 @@ func WriteToClipBoard(text string) {
 		logger.Success("Text copied to clipboard!")
 	}
 }
+
+// ReadFromClipboard 读取本机剪贴板内容。
+// 无可用剪贴板时（如 headless 环境）返回 error，由调用方决定如何提示。
+func ReadFromClipboard() (string, error) {
+	return clipboard.ReadAll()
+}

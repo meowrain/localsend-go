@@ -88,6 +88,18 @@ yay -S localsend-go
        <img src="https://blog.meowrain.cn/api/i/2025/02/09/YjbG9f1739113834583691367.avif" width="80%" />
    </div>
 
+### 命令行发送文本 / 剪贴板
+
+除了发送文件，也可以把一段文本封装成虚拟 `.txt` 文件发出去（对端会打印预览并写入剪贴板）：
+
+```bash
+localsend-go send --text "验证码 123456"
+localsend-go send --clipboard          # 发送本机剪贴板内容
+localsend-go send ./some/file.pdf      # 原来的文件发送方式
+```
+
+`<file_path>`、`--text`、`--clipboard` 三者互斥，同时给出会报错并以非 0 退出码结束。
+
 ### 特殊说明
 
 Linux系统需要额外配置ping权限：

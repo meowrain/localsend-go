@@ -21,6 +21,8 @@ func requireTTY(t *testing.T) {
 }
 
 // TestSelectDevice 测试 SelectDevice 函数
+//
+// SelectDevice 会拉起 bubbletea 程序，必须有 TTY 才能运行；CI 等无终端环境下跳过。
 func TestSelectDevice(t *testing.T) {
 	requireTTY(t)
 	// 创建一个设备更新 channel
