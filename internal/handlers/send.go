@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,8 +22,9 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-// SendFileToOtherDevicePrepare 函数
-func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiveResponse, error) {
+// SendFileToOtherDevicePrepare 向对端发起 prepare-upload 请求。
+// device 中的 Protocol/Port 决定目标地址；缺失时按 resolveSendTarget 的规则回退。
+func SendFileToOtherDevicePrepare(device models.SendModel, path string) (*models.PrepareReceiveResponse, error) {
 	// 准备所有文件的元数据
 	files := make(map[string]models.FileInfo)
 	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
@@ -70,8 +72,8 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 		return nil, fmt.Errorf("error encoding request to JSON: %w", err)
 	}
 
-	// 发送POST请求
-	url := fmt.Sprintf("https://%s:53317/api/localsend/v2/prepare-upload", ip)
+	// 发送POST请求：协议与端口取自对端广播，不再写死 https/53317
+	prepareURL := buildSendURL(device, "/api/localsend/v2/prepare-upload")
 	client := &http.Client{
 		Timeout: 60 * time.Second, // 传输超时
 		Transport: &http.Transport{
@@ -80,7 +82,7 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 			},
 		},
 	}
-	resp, err := client.Post(url, "application/json", bytes.NewBuffer(requestJson))
+	resp, err := client.Post(prepareURL, "application/json", bytes.NewBuffer(requestJson))
 	if err != nil {
 		return nil, fmt.Errorf("error sending POST request: %w", err)
 	}
@@ -110,8 +112,8 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 	return &prepareReceiveResponse, nil
 }
 
-// uploadFile 函数
-func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath string) error {
+// uploadFile 上传单个文件，目标协议与端口同样取自对端广播的设备信息。
+func uploadFile(ctx context.Context, device models.SendModel, sessionId, fileId, token, filePath string) error {
 	// 打开要发送的文件
 	file, err := os.Open(filePath)
 	if err != nil {
@@ -150,9 +152,12 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 		}),
 	)
 
-	// 构建文件上传的 URL
-	uploadURL := fmt.Sprintf("https://%s:53317/api/localsend/v2/upload?sessionId=%s&fileId=%s&token=%s",
-		ip, sessionId, fileId, token)
+	// 构建文件上传的 URL：协议与端口取自对端广播，查询参数仍需转义
+	query := url.Values{}
+	query.Set("sessionId", sessionId)
+	query.Set("fileId", fileId)
+	query.Set("token", token)
+	uploadURL := buildSendURL(device, "/api/localsend/v2/upload") + "?" + query.Encode()
 
 	// 使用 pipe 来避免将整个文件加载到内存中
 	pr, pw := io.Pipe()
@@ -234,11 +239,11 @@ func SendFile(path string) error {
 	updates := make(chan []models.SendModel)
 	discovery.ListenAndStartBroadcasts(updates)
 	fmt.Println("Please select a device you want to send file to:")
-	ip, err := tui.SelectDevice(updates)
+	device, err := tui.SelectDeviceInfo(updates)
 	if err != nil {
 		return err
 	}
-	response, err := SendFileToOtherDevicePrepare(ip, path)
+	response, err := SendFileToOtherDevicePrepare(device, path)
 	if err != nil {
 		return err
 	}
@@ -263,7 +268,7 @@ func SendFile(path string) error {
 			if !ok {
 				return fmt.Errorf("token not found for file: %s", fileId)
 			}
-			err = uploadFile(ctx, ip, response.SessionID, fileId, token, filePath)
+			err = uploadFile(ctx, device, response.SessionID, fileId, token, filePath)
 			if err != nil {
 				return fmt.Errorf("error uploading file: %w", err)
 			}

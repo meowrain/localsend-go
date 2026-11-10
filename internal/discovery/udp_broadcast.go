@@ -65,6 +65,8 @@ func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {
 			devices = append(devices, models.SendModel{
 				IP:         ip,
 				DeviceName: device.Alias,
+				Port:       device.Port,
+				Protocol:   device.Protocol,
 			})
 		}
 		shared.DevicesMutex.Unlock()
