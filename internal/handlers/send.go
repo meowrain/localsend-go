@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/meowrain/localsend-go/internal/discovery"
@@ -21,36 +22,9 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-// SendFileToOtherDevicePrepare 函数
-func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiveResponse, error) {
-	// 准备所有文件的元数据
-	files := make(map[string]models.FileInfo)
-	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			sha256Hash, err := sha256.CalculateSHA256(filePath)
-			if err != nil {
-				return fmt.Errorf("error calculating SHA256 hash: %w", err)
-			}
-			fileMetadata := models.FileInfo{
-				ID:       info.Name(), // 使用文件名作为 ID
-				FileName: info.Name(),
-				Size:     info.Size(),
-				FileType: filepath.Ext(filePath),
-				SHA256:   sha256Hash,
-			}
-			files[fileMetadata.ID] = fileMetadata
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error walking the path: %w", err)
-	}
-
-	// 创建并填充 PrepareReceiveRequest 结构体
-	request := models.PrepareReceiveRequest{
+// baseRequest 构造通用的 PrepareReceiveRequest 信封，只填本次发送的 files。
+func baseRequest(files map[string]models.FileInfo) models.PrepareReceiveRequest {
+	return models.PrepareReceiveRequest{
 		Info: models.Info{
 			Alias:       shared.Message.Alias,
 			Version:     shared.Message.Version,
@@ -63,7 +37,48 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 		},
 		Files: files,
 	}
+}
 
+// fileMetadata 根据本地文件路径生成协议所需的 FileInfo，ID 使用文件名。
+func fileMetadata(filePath string, info os.FileInfo) (models.FileInfo, error) {
+	sha256Hash, err := sha256.CalculateSHA256(filePath)
+	if err != nil {
+		return models.FileInfo{}, fmt.Errorf("error calculating SHA256 hash: %w", err)
+	}
+	return models.FileInfo{
+		ID:       info.Name(), // 使用文件名作为 ID
+		FileName: info.Name(),
+		Size:     info.Size(),
+		FileType: filepath.Ext(filePath),
+		SHA256:   sha256Hash,
+	}, nil
+}
+
+// SendFileToOtherDevicePrepare 函数
+func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiveResponse, error) {
+	// 准备所有文件的元数据
+	files := make(map[string]models.FileInfo)
+	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			fileInfo, err := fileMetadata(filePath, info)
+			if err != nil {
+				return err
+			}
+			files[fileInfo.ID] = fileInfo
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error walking the path: %w", err)
+	}
+	return sendPrepareRequest(ip, baseRequest(files))
+}
+
+// sendPrepareRequest 把已构造好的 prepare 请求发出去并解析响应。
+func sendPrepareRequest(ip string, request models.PrepareReceiveRequest) (*models.PrepareReceiveResponse, error) {
 	// 将请求结构体编码为JSON
 	requestJson, err := json.Marshal(request)
 	if err != nil {
@@ -110,26 +125,14 @@ func SendFileToOtherDevicePrepare(ip string, path string) (*models.PrepareReceiv
 	return &prepareReceiveResponse, nil
 }
 
-// uploadFile 函数
-func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath string) error {
-	// 打开要发送的文件
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("error opening file: %w", err)
-	}
-	defer file.Close()
-
-	// 获取文件大小用于进度条
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("error getting file info: %w", err)
-	}
-	fileSize := fileInfo.Size()
+// uploadContent 通过 /upload 接口发送一段内容，size 为总字节数，src 由调用方负责关闭。
+func uploadContent(ctx context.Context, ip, sessionId, fileId, token string, size int64, src io.ReadCloser) error {
+	defer src.Close()
 
 	// 创建进度条
 	bar := progressbar.NewOptions64(
-		fileSize,
-		progressbar.OptionSetDescription(fmt.Sprintf("上传 %s", filepath.Base(filePath))),
+		size,
+		progressbar.OptionSetDescription(fmt.Sprintf("上传 %s", fileId)),
 		progressbar.OptionSetWidth(15),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
@@ -162,8 +165,8 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 
 	go func() {
 		defer pw.Close()
-		// 在新的 goroutine 中写入文件数据
-		_, err := io.Copy(io.MultiWriter(pw, bar), file)
+		// 在新的 goroutine 中写出文件数据
+		_, err := io.Copy(io.MultiWriter(pw, bar), src)
 		if err != nil {
 			uploadErr <- err
 			return
@@ -190,7 +193,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 	}
 
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.ContentLength = fileSize
+	req.ContentLength = size
 
 	// 使用自定义客户端发送请求，而不是 http.DefaultClient
 	resp, err := client.Do(req)
@@ -208,6 +211,7 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 			return fmt.Errorf("error sending file upload request: %w", err)
 		}
 	}
+	defer resp.Body.Close()
 
 	// 检查响应
 	if resp.StatusCode != http.StatusOK {
@@ -229,8 +233,17 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 	return nil
 }
 
-// SendFile 函数
-func SendFile(path string) error {
+// sendSpec 描述一次发送：prepare 阶段要声明的文件，以及 upload 阶段每个 fileId 对应的数据来源。
+type sendSpec struct {
+	prepare func(ip string) (*models.PrepareReceiveResponse, error)
+	// uploadSource 返回该 fileId 对应的 token、内容与总字节数。
+	uploadSource func(fileID string, resp *models.PrepareReceiveResponse) (token string, src io.ReadCloser, size int64, err error)
+	// files 列出本次实际要上传的 fileId（顺序即上传顺序）。
+	files []string
+}
+
+// prepareAndUpload 复用同一套 prepare/upload 流程：先声明文件，再逐个上传内容。
+func prepareAndUpload(spec sendSpec) error {
 	updates := make(chan []models.SendModel)
 	discovery.ListenAndStartBroadcasts(updates)
 	fmt.Println("Please select a device you want to send file to:")
@@ -238,7 +251,7 @@ func SendFile(path string) error {
 	if err != nil {
 		return err
 	}
-	response, err := SendFileToOtherDevicePrepare(ip, path)
+	response, err := spec.prepare(ip)
 	if err != nil {
 		return err
 	}
@@ -252,21 +265,28 @@ func SendFile(path string) error {
 	RegisterCancelHandler(response.SessionID, cancel)
 	defer UnregisterCancelHandler(response.SessionID)
 
-	// 遍历目录和子文件
-	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+	for _, fileID := range spec.files {
+		token, src, size, err := spec.uploadSource(fileID, response)
+		if err != nil {
+			return err
+		}
+		if err := uploadContent(ctx, ip, response.SessionID, fileID, token, size, src); err != nil {
+			return fmt.Errorf("error uploading file: %w", err)
+		}
+	}
+	return nil
+}
+
+// SendFile 函数
+func SendFile(path string) error {
+	// 先罗列出所有待发送文件，prepare 与 upload 两个阶段共用同一份清单。
+	var paths []string
+	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
-			fileId := info.Name()
-			token, ok := response.Files[fileId]
-			if !ok {
-				return fmt.Errorf("token not found for file: %s", fileId)
-			}
-			err = uploadFile(ctx, ip, response.SessionID, fileId, token, filePath)
-			if err != nil {
-				return fmt.Errorf("error uploading file: %w", err)
-			}
+			paths = append(paths, filePath)
 		}
 		return nil
 	})
@@ -274,7 +294,71 @@ func SendFile(path string) error {
 		return fmt.Errorf("error walking the path: %w", err)
 	}
 
-	return nil
+	fileByID := make(map[string]string, len(paths))
+	ids := make([]string, 0, len(paths))
+	for _, p := range paths {
+		id := filepath.Base(p)
+		fileByID[id] = p
+		ids = append(ids, id)
+	}
+
+	return prepareAndUpload(sendSpec{
+		prepare: func(ip string) (*models.PrepareReceiveResponse, error) {
+			return SendFileToOtherDevicePrepare(ip, path)
+		},
+		files: ids,
+		uploadSource: func(fileID string, resp *models.PrepareReceiveResponse) (string, io.ReadCloser, int64, error) {
+			token, ok := resp.Files[fileID]
+			if !ok {
+				return "", nil, 0, fmt.Errorf("token not found for file: %s", fileID)
+			}
+			filePath := fileByID[fileID]
+			file, err := os.Open(filePath)
+			if err != nil {
+				return "", nil, 0, fmt.Errorf("error opening file: %w", err)
+			}
+			info, err := file.Stat()
+			if err != nil {
+				file.Close()
+				return "", nil, 0, fmt.Errorf("error getting file info: %w", err)
+			}
+			return token, file, info.Size(), nil
+		},
+	})
+}
+
+// SendText 把一段文本封装成虚拟 .txt 文件，走与 SendFile 相同的 prepare/upload 流程。
+func SendText(text string) error {
+	if strings.TrimSpace(text) == "" {
+		return ErrEmptyText
+	}
+	content := []byte(text)
+	// fileId 与 fileName 都取自同一个名字，保证 prepare 与 upload 阶段一致。
+	fileName := textFileName(time.Now())
+	fileInfo := models.FileInfo{
+		ID:       fileName,
+		FileName: fileName,
+		Size:     int64(len(content)),
+		FileType: ".txt",
+		SHA256:   sha256OfBytes(content),
+		Preview:  TruncatePreview(text),
+	}
+
+	return prepareAndUpload(sendSpec{
+		prepare: func(ip string) (*models.PrepareReceiveResponse, error) {
+			return sendPrepareRequest(ip, baseRequest(map[string]models.FileInfo{
+				fileInfo.ID: fileInfo,
+			}))
+		},
+		files: []string{fileInfo.ID},
+		uploadSource: func(fileID string, resp *models.PrepareReceiveResponse) (string, io.ReadCloser, int64, error) {
+			token, ok := resp.Files[fileID]
+			if !ok {
+				return "", nil, 0, fmt.Errorf("token not found for file: %s", fileID)
+			}
+			return token, io.NopCloser(bytes.NewReader(content)), int64(len(content)), nil
+		},
+	})
 }
 
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {

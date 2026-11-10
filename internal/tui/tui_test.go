@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"testing"
 	"time"
 
@@ -8,7 +9,15 @@ import (
 )
 
 // TestSelectDevice 测试 SelectDevice 函数
+//
+// SelectDevice 会拉起 bubbletea 程序，必须有 TTY 才能运行；CI 等无终端环境下跳过。
 func TestSelectDevice(t *testing.T) {
+	if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err != nil {
+		t.Skipf("skip SelectDevice test: no TTY available: %v", err)
+	} else {
+		f.Close()
+	}
+
 	// 创建一个设备更新 channel
 	updates := make(chan []models.SendModel)
 
