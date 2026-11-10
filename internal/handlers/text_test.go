@@ -92,3 +92,17 @@ func TestSendTextRejectsEmpty(t *testing.T) {
 		}
 	}
 }
+
+// TestTruncatePreviewInvalidUTF8 验证非法 UTF-8 前缀不会被原样发出。
+func TestTruncatePreviewInvalidUTF8(t *testing.T) {
+	// 在截断点附近放入非法字节 0x80（continuation byte 单独出现）
+	prefix := strings.Repeat("a", MaxPreviewBytes-1)
+	in := prefix + "\x80" + strings.Repeat("b", 10)
+	out := TruncatePreview(in)
+	if !utf8.ValidString(out) {
+		t.Fatalf("truncated preview must be valid UTF-8, got %q", out)
+	}
+	if len(out) > MaxPreviewBytes {
+		t.Fatalf("truncated preview too long: %d", len(out))
+	}
+}

@@ -33,13 +33,20 @@ func sha256OfBytes(content []byte) string {
 
 // TruncatePreview 生成 prepare 阶段携带的文本预览：
 // 超过 MaxPreviewBytes 的部分被截断，且不会切断 UTF-8 字符。
+//
+// 注意：utf8.RuneStart 只说明「该字节不是 continuation byte」，被截断的
+// 多字节序列的 leader byte 也满足它。所以先按 RuneStart 回退，再确认前缀
+// 确实是合法 UTF-8；若不合法（输入本身含非法字节）就继续回退，保证不会
+// 把半个 rune / 非法字节发给对端。
 func TruncatePreview(text string) string {
 	if len(text) <= MaxPreviewBytes {
 		return text
 	}
 	cut := MaxPreviewBytes
-	// 回退到前一个合法字符边界，避免产生半个 rune 的乱码。
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
+	for cut > 0 {
+		if utf8.RuneStart(text[cut]) && utf8.ValidString(text[:cut]) {
+			break
+		}
 		cut--
 	}
 	return text[:cut]
