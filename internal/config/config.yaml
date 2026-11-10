@@ -1,3 +1,7 @@
+# Device name shown to other devices
+# Leave empty to use a random generated name
+device_name: ""
+
 functions:
   http_file_server: true
   local_send_server: true

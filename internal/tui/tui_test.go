@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,8 +41,11 @@ func TestSelectDevice(t *testing.T) {
 		}
 	}()
 
-	// 调用 SelectDevice 函数
+	// 调用 SelectDevice 函数（需要 TTY，无终端的环境下跳过）
 	ip, err := SelectDevice(updates)
+	if err != nil && strings.Contains(err.Error(), "/dev/tty") {
+		t.Skipf("skip TUI test without a TTY: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("SelectDevice returned an error: %v", err)
 	}

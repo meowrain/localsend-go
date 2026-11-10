@@ -317,7 +317,7 @@ func WebServerMode(httpServer *http.ServeMux, port int) {
 		logger.Errorf("Failed to create uploads directory: %v", err)
 		return
 	}
-	if config.ConfigData.Functions.HttpFileServer {
+	if config.ConfigData.HttpFileServerEnabled() {
 		httpServer.HandleFunc("/", handlers.IndexFileHandler)
 		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
 		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
@@ -379,6 +379,11 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		fmt.Println("Options:")
 		fmt.Println("  --help              Display this help information")
 		fmt.Println("  --port=<number>     Specify server port (default: 53317)")
+		fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
+		fmt.Println("")
+		fmt.Println("Config lookup order: --config/LOCALSEND_CONFIG > ./config.yaml >")
+		fmt.Println("  user config dir (e.g. ~/.config/localsend-go/config.yaml) >")
+		fmt.Println("  legacy internal/config/config.yaml > embedded defaults")
 	}
 	flag.Usage = showHelp
 	// 解析标准flag参数
@@ -392,17 +397,19 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		}
 	}
 
-	if len(os.Args) > 1 {
+	// 只取第一个非 flag 参数作为模式，允许 `localsend-go --port 53318 web` 这样的写法
+	args := flag.Args()
+	if len(args) > 0 {
 		*flagOpen = true
-		mode := os.Args[1]
+		mode := args[0]
 
 		switch mode {
 		case "web":
 			WebServerMode(httpServer, port)
 		case "send":
 			filePath := ""
-			if len(os.Args) > 2 {
-				filePath = os.Args[2]
+			if len(args) > 1 {
+				filePath = args[1]
 				SendMode(filePath)
 			} else {
 				logger.Error("Need file path")
@@ -417,10 +424,14 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 	}
 }
 
-var port int
+var (
+	port       int
+	configPath string
+)
 
 func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
+	flag.StringVar(&configPath, "config", "", "Path to config file")
 }
 
 func main() {
@@ -434,11 +445,16 @@ func main() {
 	}()
 	logger.InitLogger()
 
+	// 显式指定的配置文件优先级最高，必须在读取 config.ConfigData 之前设置
+	config.SetPath(configPath)
+	// 提前加载配置，方便在启动日志里提示实际使用的配置文件
+	config.Load()
+
 	// Start HTTP server
 	httpServer := server.New()
 
 	/* Send and receive section */
-	if config.ConfigData.Functions.LocalSendServer {
+	if config.ConfigData.LocalSendServerEnabled() {
 		httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
 		httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
