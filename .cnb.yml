@@ -1,0 +1,24 @@
+# CNB 云原生构建配置
+# 文档：https://docs.cnb.cool/zh/build/npc.html
+#
+# 这里只声明 NPC 事件流水线：在 Issue / PR 评论中 @仓库路径(角色名) 时触发。
+# 角色（人设、标语、提示词）定义在 .cnb/settings.yml 的 npc.roles 中。
+#
+# 使用默认镜像 cnbcool/default-npc:latest，其中已内置 npc:go 运行所需环境。
+# 若后续需要预装 Go 工具链、加速依赖下载，可按文档构建自定义镜像，
+# 并把 image 换成 ${CNB_DOCKER_REGISTRY}/${CNB_NPC_SLUG_LOWERCASE}:latest。
+
+$:
+  issue.comment@npc:
+    - docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: npc go
+          type: npc:go
+
+  pull_request.comment@npc:
+    - docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: npc go
+          type: npc:go

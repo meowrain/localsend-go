@@ -86,14 +86,14 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	err := os.MkdirAll(dir, os.ModePerm)
 	if err != nil {
 		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
-		logger.Errorf("Error creating directory:", err)
+		logger.Errorf("Error creating directory: %v", err)
 		return
 	}
 	// 创建文件
 	file, err := os.Create(filePath)
 	if err != nil {
 		http.Error(w, "Failed to create file", http.StatusInternalServerError)
-		logger.Errorf("Error creating file:", err)
+		logger.Errorf("Error creating file: %v", err)
 		return
 	}
 	defer file.Close()
@@ -160,7 +160,7 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	case err := <-done:
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
-			logger.Errorf("Transfer error:", err)
+			logger.Errorf("Transfer error: %v", err)
 			// 删除未完成的文件
 			os.Remove(filePath)
 			return

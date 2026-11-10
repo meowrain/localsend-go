@@ -13,7 +13,7 @@ func GetInfoHandler(w http.ResponseWriter, r *http.Request) {
 	msg := shared.Message
 	res, err := json.Marshal(msg)
 	if err != nil {
-		logger.Errorf("json convert failed:", err)
+		logger.Errorf("json convert failed: %v", err)
 		http.Error(w, "json convert failed", http.StatusInternalServerError)
 		return
 	}
@@ -21,7 +21,7 @@ func GetInfoHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = w.Write(res)
 	if err != nil {
 		http.Error(w, "Failed to write file", http.StatusInternalServerError)
-		logger.Errorf("Error writing file:", err)
+		logger.Errorf("Error writing file: %v", err)
 		return
 	}
 }

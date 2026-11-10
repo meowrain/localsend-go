@@ -63,7 +63,7 @@ func pingScan() ([]string, error) {
 				defer wg.Done()
 				pinger, err := probing.NewPinger(ip)
 				if err != nil {
-					logger.Errorf("Failed to create pinger:", err)
+					logger.Errorf("Failed to create pinger: %v", err)
 					return
 				}
 				pinger.SetPrivileged(true)
