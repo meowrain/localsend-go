@@ -1,14 +1,27 @@
 package tui
 
 import (
+	"os"
 	"testing"
 	"time"
 
 	"github.com/meowrain/localsend-go/internal/models"
 )
 
+// requireTTY 在没有终端的环境（如 CI）下跳过需要 TTY 的交互测试。
+// Bubble Tea 默认会打开 /dev/tty，无终端时直接返回错误。
+func requireTTY(t *testing.T) {
+	t.Helper()
+	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		t.Skipf("skip interactive TUI test: no TTY available: %v", err)
+	}
+	_ = f.Close()
+}
+
 // TestSelectDevice 测试 SelectDevice 函数
 func TestSelectDevice(t *testing.T) {
+	requireTTY(t)
 	// 创建一个设备更新 channel
 	updates := make(chan []models.SendModel)
 

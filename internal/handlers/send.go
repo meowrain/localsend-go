@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -150,9 +151,13 @@ func uploadFile(ctx context.Context, ip, sessionId, fileId, token, filePath stri
 		}),
 	)
 
-	// 构建文件上传的 URL
-	uploadURL := fmt.Sprintf("https://%s:53317/api/localsend/v2/upload?sessionId=%s&fileId=%s&token=%s",
-		ip, sessionId, fileId, token)
+	// 构建文件上传的 URL：查询参数统一用 url.Values 编码，
+	// 中文、空格、&、#、% 等字符会被正确转义，避免接收端解析出错误的 fileId/token
+	query := url.Values{}
+	query.Set("sessionId", sessionId)
+	query.Set("fileId", fileId)
+	query.Set("token", token)
+	uploadURL := fmt.Sprintf("https://%s:53317/api/localsend/v2/upload?%s", ip, query.Encode())
 
 	// 使用 pipe 来避免将整个文件加载到内存中
 	pr, pw := io.Pipe()
@@ -252,29 +257,88 @@ func SendFile(path string) error {
 	RegisterCancelHandler(response.SessionID, cancel)
 	defer UnregisterCancelHandler(response.SessionID)
 
-	// 遍历目录和子文件
+	var localFiles []localFile
 	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() {
-			fileId := info.Name()
-			token, ok := response.Files[fileId]
-			if !ok {
-				return fmt.Errorf("token not found for file: %s", fileId)
-			}
-			err = uploadFile(ctx, ip, response.SessionID, fileId, token, filePath)
-			if err != nil {
-				return fmt.Errorf("error uploading file: %w", err)
-			}
+		if info.IsDir() {
+			return nil
 		}
+		relID, err := relativeFileID(path, filePath)
+		if err != nil {
+			return err
+		}
+		localFiles = append(localFiles, localFile{
+			path:  filePath,
+			name:  info.Name(),
+			relID: relID,
+		})
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("error walking the path: %w", err)
 	}
 
+	// 遍历目录和子文件
+	for _, f := range localFiles {
+		fileID, token, ok := matchUploadTarget(response.Files, f)
+		if !ok {
+			return fmt.Errorf("error walking the path: %w", fmt.Errorf("token not found for file: %s", f.name))
+		}
+		if err := uploadFile(ctx, ip, response.SessionID, fileID, token, f.path); err != nil {
+			return fmt.Errorf("error walking the path: %w", fmt.Errorf("error uploading file: %w", err))
+		}
+	}
+
 	return nil
+}
+
+// localFile 是待上传文件在本地的描述。
+type localFile struct {
+	path  string // 本地绝对/相对路径
+	name  string // 文件名（basename），也是 prepare 阶段使用的 fileId
+	relID string // 相对发送根目录的路径，用于匹配接收端重写过的 fileId
+}
+
+// relativeFileID 返回 filePath 相对 root 的路径（统一用 /），用作备选的 fileId。
+func relativeFileID(root, filePath string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	fileAbs, err := filepath.Abs(filePath)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(rootAbs); err == nil && !info.IsDir() {
+		return filepath.Base(fileAbs), nil
+	}
+	rel, err := filepath.Rel(rootAbs, fileAbs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
+// matchUploadTarget 在接收端返回的 fileId->token 映射里找到当前文件对应的条目。
+// 官方 App 会用自己生成的 id 覆盖我们提交的 fileId，因此按「相对路径 -> 文件名」依次回退匹配。
+func matchUploadTarget(tokens map[string]string, f localFile) (string, string, bool) {
+	for _, candidate := range []string{f.name, f.relID} {
+		if candidate == "" {
+			continue
+		}
+		if token, ok := tokens[candidate]; ok {
+			return candidate, token, true
+		}
+	}
+	// 只有一个文件且接收端只回了一个 token 时，直接用它
+	if len(tokens) == 1 {
+		for id, token := range tokens {
+			return id, token, true
+		}
+	}
+	return "", "", false
 }
 
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
