@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -59,7 +60,9 @@ func SelectDeviceInfo(updates <-chan []models.SendModel) (models.SendModel, erro
 	if m, ok := m.(model); ok && len(m.devices) > 0 {
 		return m.devices[m.cursor], nil
 	}
-	return models.SendModel{}, nil
+	// 不能让调用方拿到零值设备：那样会拼出 https://:53317 这种地址，
+	// 用户最终看到的是 "connection refused"，与「没有选中设备」毫无关系。
+	return models.SendModel{}, errors.New("no device selected")
 }
 
 // model 结构体用于 Bubble Tea

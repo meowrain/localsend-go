@@ -81,6 +81,27 @@ func parseSendOptions(args []string, usage io.Writer) (sendOptions, error) {
 	fs.StringVar(&opts.Text, "text", "", "要发送的文本内容")
 	fs.BoolVar(&opts.Clipboard, "clipboard", false, "发送本机剪贴板内容")
 
+	// 先统计每个 flag 出现的次数：flag 包对重复传入是「后者覆盖前者」，
+	// 用户写 `--text a --text b` 时会静默只发 b，这里直接拒绝。
+	counts := make(map[string]int)
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+		name := strings.TrimLeft(arg, "-")
+		if idx := strings.IndexByte(name, '='); idx >= 0 {
+			name = name[:idx]
+		}
+		if name == "text" || name == "clipboard" {
+			counts[name]++
+		}
+	}
+	for name, n := range counts {
+		if n > 1 {
+			return opts, fmt.Errorf("--%s 重复出现 %d 次，只允许一次", name, n)
+		}
+	}
+
 	if err := fs.Parse(args); err != nil {
 		return opts, err
 	}

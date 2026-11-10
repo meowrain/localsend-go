@@ -26,6 +26,9 @@ func TestParseSendOptionsMutualExclusion(t *testing.T) {
 		{name: "too many paths", args: []string{"a.txt", "b.txt"}, wantErr: "只接受一个文件路径"},
 		{name: "unknown flag", args: []string{"--nope"}, wantErr: "not defined"},
 		{name: "flag needs argument", args: []string{"--text"}, wantErr: "needs an argument"},
+		{name: "duplicate text", args: []string{"--text", "a", "--text", "b"}, wantErr: "重复出现"},
+		{name: "duplicate text equals form", args: []string{"--text=a", "--text=b"}, wantErr: "重复出现"},
+		{name: "duplicate clipboard", args: []string{"--clipboard", "--clipboard"}, wantErr: "重复出现"},
 	}
 
 	for _, tc := range tests {
