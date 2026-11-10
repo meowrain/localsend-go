@@ -283,7 +283,7 @@ func prepareAndUpload(spec sendSpec) error {
 	defer UnregisterCancelHandler(response.SessionID)
 
 	for _, entry := range spec.entries {
-		fileID, token, ok := matchUploadTarget(response.Files, entry.file)
+		fileID, token, ok := matchUploadTarget(response.Files, entry.file, len(spec.entries))
 		if !ok {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("token not found for file: %s", entry.file.name))
 		}
@@ -408,7 +408,10 @@ func relativeFileID(root, filePath string) (string, error) {
 
 // matchUploadTarget 在接收端返回的 fileId->token 映射里找到当前文件对应的条目。
 // 官方 App 会用自己生成的 id 覆盖我们提交的 fileId，因此按「相对路径 -> 文件名」依次回退匹配。
-func matchUploadTarget(tokens map[string]string, f localFile) (string, string, bool) {
+//
+// localCount 是本次待上传的文件总数：只有「本地只有一个文件、接收端也只回了一个 token」
+// 时才允许兜底，否则多文件场景下会让所有文件共用同一个 token，互相覆盖。
+func matchUploadTarget(tokens map[string]string, f localFile, localCount int) (string, string, bool) {
 	for _, candidate := range []string{f.name, f.relID} {
 		if candidate == "" {
 			continue
@@ -418,7 +421,7 @@ func matchUploadTarget(tokens map[string]string, f localFile) (string, string, b
 		}
 	}
 	// 只有一个文件且接收端只回了一个 token 时，直接用它
-	if len(tokens) == 1 {
+	if localCount == 1 && len(tokens) == 1 {
 		for id, token := range tokens {
 			return id, token, true
 		}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/meowrain/localsend-go/internal/models"
 )
@@ -305,5 +306,39 @@ func TestSessionStoreEviction(t *testing.T) {
 	store.mu.RUnlock()
 	if n > maxSessions {
 		t.Fatalf("store holds %d sessions, want <= %d", n, maxSessions)
+	}
+}
+
+// TestSessionStoreEvictionKeepsActive 验证淘汰时优先保留最近仍在传输的会话。
+func TestSessionStoreEvictionKeepsActive(t *testing.T) {
+	store.reset()
+	t.Cleanup(store.reset)
+
+	active := &receiveSession{
+		id:       "active",
+		tokens:   map[string]string{},
+		names:    map[string]string{},
+		created:  time.Now().Add(-time.Hour),
+		lastUsed: time.Now(),
+	}
+	store.add(active)
+	for i := 0; i < maxSessions-1; i++ {
+		store.add(&receiveSession{
+			id:      fmt.Sprintf("s-%d", i),
+			tokens:  map[string]string{},
+			names:   map[string]string{},
+			created: time.Now().Add(-time.Minute),
+		})
+	}
+	// 再塞一个触发淘汰：最久未使用的应该是 created 更早的其它会话，而不是 active
+	store.add(&receiveSession{
+		id:      "trigger",
+		tokens:  map[string]string{},
+		names:   map[string]string{},
+		created: time.Now(),
+	})
+
+	if _, ok := store.lookup("active"); !ok {
+		t.Fatal("active session should survive eviction")
 	}
 }

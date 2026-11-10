@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -29,11 +30,12 @@ const uploadBaseDir = "uploads"
 const maxPreviewClipboardSize = 64 << 10
 
 type receiveSession struct {
-	id      string
-	tokens  map[string]string // fileID -> token
-	names   map[string]string // fileID -> 清理后的文件名
-	peerIP  string            // prepare-upload 请求的来源 IP
-	created time.Time
+	id       string
+	tokens   map[string]string // fileID -> token
+	names    map[string]string // fileID -> 清理后的文件名
+	peerIP   string            // prepare-upload 请求的来源 IP
+	created  time.Time
+	lastUsed time.Time // 最近一次成功上传的时间，用于淘汰时优先保留活跃会话
 }
 
 // receiveStore 保存 prepare 阶段下发的会话信息。
@@ -62,17 +64,35 @@ func (s *receiveStore) add(sess *receiveSession) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.sessions) >= maxSessions {
-		var oldest *receiveSession
+		// 优先淘汰最久未被使用的会话，避免误删正在传输的会话
+		var victim *receiveSession
 		for _, v := range s.sessions {
-			if oldest == nil || v.created.Before(oldest.created) {
-				oldest = v
+			if victim == nil || v.idleSince().Before(victim.idleSince()) {
+				victim = v
 			}
 		}
-		if oldest != nil {
-			delete(s.sessions, oldest.id)
+		if victim != nil {
+			delete(s.sessions, victim.id)
 		}
 	}
 	s.sessions[sess.id] = sess
+}
+
+// idleSince 返回会话「最后一次活动」的时间：上传过就用 lastUsed，否则退回 created。
+func (s *receiveSession) idleSince() time.Time {
+	if s.lastUsed.After(s.created) {
+		return s.lastUsed
+	}
+	return s.created
+}
+
+// touch 记录一次成功的上传，避免该会话成为淘汰时最优先的候选。
+func (s *receiveStore) touch(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess, ok := s.sessions[id]; ok {
+		sess.lastUsed = time.Now()
+	}
 }
 
 // lookup 返回会话副本，避免调用方持有锁期间被并发修改。
@@ -209,12 +229,9 @@ func validateUpload(r *http.Request) (receiveSession, string, string, error) {
 }
 
 // subtleCompare 常量时间比较，避免 token 校验被计时侧信道利用。
+// 直接用标准库实现，避免自研位运算在长度不等时越界或误判。
 func subtleCompare(a, b string) int {
-	diff := 0
-	for i := 0; i < len(a); i++ {
-		diff |= int(a[i] ^ b[i])
-	}
-	return 1 & ((diff - 1) >> 8)
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b))
 }
 
 func sameHost(a, b net.IP) bool {
@@ -342,5 +359,7 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Success("File saved to:", filePath)
 	logger.Debugf("Upload finished: session=%s fileId=%s", sess.id, fileID)
+	// 标记该会话仍在使用，避免它在后续 prepare 触发淘汰时被优先清掉
+	store.touch(sess.id)
 	w.WriteHeader(http.StatusOK)
 }

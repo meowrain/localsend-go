@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/meowrain/localsend-go/internal/config"
 	"github.com/meowrain/localsend-go/internal/discovery"
+	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/handlers"
 	"github.com/meowrain/localsend-go/internal/pkg/server"
 	"github.com/meowrain/localsend-go/internal/utils/logger"
@@ -432,18 +433,6 @@ func ExitMode() {
 }
 
 func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
-	flag.Usage = showHelp
-	// 解析标准flag参数
-	flag.Parse()
-
-	// 检查是否有 --help 参数
-	for _, arg := range os.Args {
-		if arg == "--help" || arg == "-h" {
-			showHelp()
-			ExitMode()
-		}
-	}
-
 	// 只取第一个非 flag 参数作为模式，允许 `localsend-go --port 53318 web` 这样的写法
 	args := flag.Args()
 	if len(args) > 0 {
@@ -454,7 +443,8 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 		case "web":
 			WebServerMode(httpServer, port)
 		case "send":
-			runSendCommand(os.Args[2:])
+			// 用 flag.Args() 的子切片，兼容 `localsend-go --port 53318 send ...` 这种写法
+			runSendCommand(args[1:])
 		case "receive":
 			ReceiveMode()
 		case "help":
@@ -489,10 +479,25 @@ func main() {
 	}()
 	logger.InitLogger()
 
+	// 先解析命令行参数：--config 与 --port 都必须早于配置加载与监听端口绑定。
+	// 之前 flag.Parse() 放在 flagParse() 里，导致 --config 读到的是零值、
+	// --port 也无法影响已经启动的监听，二者实际都不生效。
+	flag.Usage = showHelp
+	flag.Parse()
+	for _, arg := range os.Args {
+		if arg == "--help" || arg == "-h" {
+			showHelp()
+			ExitMode()
+		}
+	}
+
 	// 显式指定的配置文件优先级最高，必须在读取 config.ConfigData 之前设置
 	config.SetPath(configPath)
 	// 提前加载配置，方便在启动日志里提示实际使用的配置文件
 	config.Load()
+	// 配置就绪后再同步广播消息里的设备名与监听端口
+	shared.SyncFromConfig()
+	shared.SetListenPort(port)
 
 	// Start HTTP server
 	httpServer := server.New()

@@ -105,18 +105,22 @@ func TestEndToEndChineseNameAndForgedToken(t *testing.T) {
 func TestMatchUploadTarget(t *testing.T) {
 	f := localFile{path: "/tmp/dir/a.txt", name: "a.txt", relID: "dir/a.txt"}
 
-	if id, tok, ok := matchUploadTarget(map[string]string{"a.txt": "t1"}, f); !ok || id != "a.txt" || tok != "t1" {
+	if id, tok, ok := matchUploadTarget(map[string]string{"a.txt": "t1"}, f, 1); !ok || id != "a.txt" || tok != "t1" {
 		t.Fatalf("basename match failed: %q %q %v", id, tok, ok)
 	}
-	if id, _, ok := matchUploadTarget(map[string]string{"dir/a.txt": "t2"}, f); !ok || id != "dir/a.txt" {
+	if id, _, ok := matchUploadTarget(map[string]string{"dir/a.txt": "t2"}, f, 1); !ok || id != "dir/a.txt" {
 		t.Fatalf("relative path match failed: %q %v", id, ok)
 	}
 	// 官方 App 用自己生成的 id 覆盖，只有一个文件时直接采用
-	if id, tok, ok := matchUploadTarget(map[string]string{"uuid-1": "t3"}, f); !ok || id != "uuid-1" || tok != "t3" {
+	if id, tok, ok := matchUploadTarget(map[string]string{"uuid-1": "t3"}, f, 1); !ok || id != "uuid-1" || tok != "t3" {
 		t.Fatalf("single-token fallback failed: %q %q %v", id, tok, ok)
 	}
-	if _, _, ok := matchUploadTarget(map[string]string{"x": "1", "y": "2"}, f); ok {
+	if _, _, ok := matchUploadTarget(map[string]string{"x": "1", "y": "2"}, f, 1); ok {
 		t.Fatal("ambiguous multi-token map should not match")
+	}
+	// 本地有多个文件时，不能兜底到唯一的 token，否则多个文件会互相覆盖
+	if _, _, ok := matchUploadTarget(map[string]string{"uuid-1": "t3"}, f, 2); ok {
+		t.Fatal("multi-file send must not fall back to the only token")
 	}
 }
 
