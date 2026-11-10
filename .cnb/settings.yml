@@ -2,7 +2,7 @@
 # 文档：https://docs.cnb.cool/zh/repo/settings-npc.html
 #
 # 使用方式：在 Issue / PR 评论中 @仓库路径(角色名)，例如：
-#   @meowrain/localsend-go(代码审查员) 帮我看看这个 PR 有没有问题
+#   @meowyyds/localsend-go(代码审查员) 帮我看看这个 PR 有没有问题
 #
 # 说明：
 # - 角色头像（avatar.src）与按钮悬浮图（button.hoverImage）必须引用默认分支中的图片，
