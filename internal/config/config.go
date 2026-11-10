@@ -2,6 +2,7 @@ package config
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -221,6 +222,32 @@ func Read(path string) (Config, error) {
 
 // load 按优先级查找并加载配置；没有找到任何配置文件时使用默认值并写出默认配置
 func load() (Config, string, error) {
+	// 显式指定的路径（--config / LOCALSEND_CONFIG）必须严格对待：
+	// 文件不存在时把默认配置写到该路径，而不是静默落到用户配置目录，
+	// 否则用户按自己给的路径改配置永远不生效。
+	explicit := explicitPath
+	if explicit == "" {
+		explicit = os.Getenv(EnvConfigPath)
+	}
+	if explicit != "" {
+		cfg, err := Read(explicit)
+		switch {
+		case err == nil:
+			applyDefaults(&cfg, DefaultConfig())
+			return cfg, explicit, nil
+		case errors.Is(err, os.ErrNotExist):
+			cfg = DefaultConfig()
+			if werr := WriteDefault(explicit, cfg); werr != nil {
+				logger.Warnf("Config %s does not exist and cannot be created: %v", explicit, werr)
+				return cfg, "<embedded>", nil
+			}
+			logger.Infof("Config %s did not exist, generated default config there", explicit)
+			return cfg, explicit, nil
+		default:
+			return DefaultConfig(), explicit, err
+		}
+	}
+
 	for _, path := range CandidatePaths() {
 		info, err := os.Stat(path)
 		if err != nil || info.IsDir() {
@@ -233,7 +260,10 @@ func load() (Config, string, error) {
 			if !filepath.IsAbs(abs) {
 				abs = filepath.Join(wd, path)
 			}
-			return DefaultConfig(), abs, err
+			// 解析失败也要走同一套设备名解析，否则会以空 alias 广播
+			cfg = DefaultConfig()
+			cfg.NameOfDevice = resolveDeviceName(cfg.DeviceName)
+			return cfg, abs, err
 		}
 		// 旧版内嵌配置没有 functions 段，补齐默认开关，保证旧路径仍然可用
 		applyDefaults(&cfg, DefaultConfig())
@@ -266,7 +296,20 @@ func WriteDefault(path string, cfg Config) error {
 	}
 	header := "# localsend-go configuration\n" +
 		"# device_name: leave empty to use a randomly generated name\n"
-	return os.WriteFile(path, append([]byte(header), data...), 0o644)
+	content := append([]byte(header), data...)
+	// O_EXCL：目标已存在时绝不覆盖用户手写的配置；权限 0600，配置里可能含主机名/路径。
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(content); err != nil {
+		return err
+	}
+	return nil
 }
 
 // applyDefaults 用内嵌默认值补齐配置文件缺失的字段。

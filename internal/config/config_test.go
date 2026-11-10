@@ -34,6 +34,10 @@ func isolateConfigEnv(t *testing.T, configDir string) {
 	t.Setenv(EnvConfigPath, "")
 	t.Setenv("HOME", configDir)
 	t.Setenv("XDG_CONFIG_HOME", "")
+	// SetPath 设置的显式路径是包级状态，测试之间必须清掉，否则会泄漏到后续用例
+	mu.Lock()
+	explicitPath = ""
+	mu.Unlock()
 	reset()
 }
 

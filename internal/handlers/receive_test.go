@@ -231,9 +231,24 @@ func TestSanitizeFileName(t *testing.T) {
 		}
 	}
 
-	for _, in := range []string{"", "..", "../x", "/abs.txt", `C:\x.txt`, "a\x00b"} {
+	for _, in := range []string{
+		"", "..", "../x", "/abs.txt", `C:\x.txt`, "a\x00b",
+		// Windows 保留设备名
+		"CON", "con.txt", "NUL", "nul.tar.gz", "COM1", "lpt9.log",
+		// 超长文件名（> 200 字节）
+		strings.Repeat("a", 240) + ".txt",
+		// 格式字符：RLO 与零宽字符
+		"\u202eexe.txt", "a\u200bb.txt",
+	} {
 		if _, err := sanitizeFileName(in); err == nil {
 			t.Fatalf("sanitizeFileName(%q) should fail", in)
+		}
+	}
+
+	// 正常文件名里的百分号不应被误杀；%2f/%2e 这类编码仍按原策略拒绝
+	for _, in := range []string{"50%off.txt", "a%2.txt"} {
+		if _, err := sanitizeFileName(in); err != nil {
+			t.Fatalf("sanitizeFileName(%q) should succeed, got %v", in, err)
 		}
 	}
 }

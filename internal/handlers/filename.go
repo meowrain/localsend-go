@@ -32,14 +32,40 @@ func safeJoinUnder(base, name string) (string, error) {
 	return full, nil
 }
 
+// maxFileNameBytes 限制落盘文件名的字节数：
+// 常见文件系统单个文件名上限是 255 字节，留出扩展名与清理的余量后取 200。
+const maxFileNameBytes = 200
+
+// windowsReservedNames 是 Windows 下不能作为文件名的设备名（不含扩展名时也不允许）。
+var windowsReservedNames = map[string]bool{
+	"CON": true, "PRN": true, "AUX": true, "NUL": true,
+	"COM1": true, "COM2": true, "COM3": true, "COM4": true, "COM5": true,
+	"COM6": true, "COM7": true, "COM8": true, "COM9": true,
+	"LPT1": true, "LPT2": true, "LPT3": true, "LPT4": true, "LPT5": true,
+	"LPT6": true, "LPT7": true, "LPT8": true, "LPT9": true,
+}
+
+// isWindowsReservedName 判断 Windows 保留设备名（大小写不敏感，忽略扩展名）。
+func isWindowsReservedName(name string) bool {
+	base := name
+	if idx := strings.IndexByte(base, '.'); idx >= 0 {
+		base = base[:idx]
+	}
+	return windowsReservedNames[strings.ToUpper(base)]
+}
+
 // isSafeBaseName 判断 name 是否是可以直接落盘的“纯文件名”。
 func isSafeBaseName(name string) bool {
 	if name == "" || !utf8.ValidString(name) {
 		return false
 	}
-	// 控制字符、路径分隔符都不允许出现在文件名里
+	if len(name) > maxFileNameBytes {
+		return false
+	}
+	// 控制字符、格式字符（如 U+202E 反向覆盖、零宽字符）都不允许：
+	// Cf 类不是 Cc，IsControl 挡不住，但足够用来伪装扩展名。
 	for _, r := range name {
-		if r == utf8.RuneError || unicode.IsControl(r) {
+		if r == utf8.RuneError || unicode.IsControl(r) || unicode.In(r, unicode.Cf) {
 			return false
 		}
 	}
@@ -57,6 +83,9 @@ func isSafeBaseName(name string) bool {
 	if strings.Contains(name, ":") {
 		return false
 	}
+	if isWindowsReservedName(name) {
+		return false
+	}
 	return true
 }
 
@@ -70,8 +99,8 @@ func sanitizeFileName(name string) (string, error) {
 	if strings.HasPrefix(name, "/") || strings.HasPrefix(name, "\\") || filepath.IsAbs(name) {
 		return "", ErrInvalidFileName
 	}
-	// 文件名里出现 URL 编码的分隔符/点号，说明发送端做了二次编码或在掩盖路径，
-	// localsend 协议里 fileName 是明文，正常客户端不会这样传，直接拒绝。
+	// 文件名里出现 URL 编码的分隔符/点号，说明发送端做了二次编码或在掩盖路径。
+	// 协议里 fileName 是明文，正常客户端不会这样传，直接拒绝（宁误杀不放行）。
 	lowered := strings.ToLower(name)
 	if strings.Contains(lowered, "%2f") || strings.Contains(lowered, "%5c") || strings.Contains(lowered, "%2e") {
 		return "", ErrInvalidFileName
