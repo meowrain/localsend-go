@@ -50,7 +50,9 @@ func fileMetadata(filePath string, info os.FileInfo) (models.FileInfo, error) {
 		ID:       info.Name(), // 使用文件名作为 ID
 		FileName: info.Name(),
 		Size:     info.Size(),
-		FileType: filepath.Ext(filePath),
+		// fileType 按协议是 MIME（image/png 等），不是扩展名：
+		// 官方 App 依赖它决定预览与保存策略。
+		FileType: mimeTypeForPath(filePath),
 		SHA256:   sha256Hash,
 	}, nil
 }
@@ -106,17 +108,7 @@ func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRe
 
 	// 检查响应
 	if resp.StatusCode != http.StatusOK {
-		switch resp.StatusCode {
-		case 204:
-			return nil, fmt.Errorf("finished (No file transfer needed)")
-		case 400:
-			return nil, fmt.Errorf("invalid body")
-		case 403:
-			return nil, fmt.Errorf("rejected")
-		case 500:
-			return nil, fmt.Errorf("unknown error by receiver")
-		}
-		return nil, fmt.Errorf("failed to send metadata: received status code %d", resp.StatusCode)
+		return nil, describePrepareError(resp)
 	}
 
 	// 解码响应JSON为PrepareReceiveResponse结构体
@@ -227,17 +219,7 @@ func uploadContent(ctx context.Context, device models.SendModel, sessionId, file
 
 	// 检查响应
 	if resp.StatusCode != http.StatusOK {
-		switch resp.StatusCode {
-		case 400:
-			return fmt.Errorf("missing parameters")
-		case 403:
-			return fmt.Errorf("invalid token or IP address")
-		case 409:
-			return fmt.Errorf("blocked by another session")
-		case 500:
-			return fmt.Errorf("unknown error by receiver")
-		}
-		return fmt.Errorf("file upload failed: received status code %d", resp.StatusCode)
+		return describeUploadError(resp)
 	}
 
 	fmt.Println() // 添加换行，让进度条显示更清晰
@@ -359,7 +341,7 @@ func SendText(text string) error {
 		ID:       fileName,
 		FileName: fileName,
 		Size:     int64(len(content)),
-		FileType: ".txt",
+		FileType: defaultTextMimeType, // 协议要求 fileType 是 MIME，不是扩展名
 		SHA256:   sha256OfBytes(content),
 		Preview:  TruncatePreview(text),
 	}

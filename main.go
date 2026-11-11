@@ -506,6 +506,9 @@ func main() {
 	if config.ConfigData.LocalSendServerEnabled() {
 		httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
 		httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
+		// 协议 3.1 / 3.2 的双向发现：多播公告与 HTTP 探测都会打这条路由，
+		// 缺了它本机永远进不了对端的设备列表。
+		httpServer.HandleFunc("/api/localsend/v2/register", handlers.RegisterHandler)
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
 		httpServer.HandleFunc("/api/localsend/v2/cancel", handlers.HandleCancel)
 	}

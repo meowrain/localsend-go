@@ -78,11 +78,16 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 					return
 				}
 
+				// register 的响应是本机的设备信息（models.RegisterResponse），
+				// 字段是 BroadcastMessage 的子集，直接反序列化即可；LastSeen 另行赋值。
 				var response models.BroadcastMessage
 				if err := json.Unmarshal(body, &response); err != nil {
 					logger.Errorf("Failed to parse HTTP response from %s: %v", ip, err)
 					return
 				}
+				// 响应里通常不带 announce（那是 UDP 公告专用字段），不修正的话
+				// 探测到的设备会被当成「不要求回复」，与 UDP 链路的行为不一致。
+				response.Announce = true
 
 				response.LastSeen = time.Now()
 

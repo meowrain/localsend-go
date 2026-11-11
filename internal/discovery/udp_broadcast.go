@@ -57,6 +57,11 @@ func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {
 
 		logger.Debugf("Parsed message from %s: %+v", remoteAddr.IP.String(), message)
 
+		// 协议 3.1：收到 announce == true 的公告后要向来源回发 POST /v2/register，
+		// 完成双向确认。回发失败只记日志，不影响下面的设备列表更新与主循环。
+		// 放到 goroutine 里是因为 HTTP 回发可能阻塞数百毫秒，不能卡住收包循环。
+		go replyToAnnouncement(remoteAddr.IP.String(), message, postbackRegister)
+
 		shared.DevicesMutex.Lock()
 		shared.DiscoveredDevices[remoteAddr.IP.String()] = message
 
