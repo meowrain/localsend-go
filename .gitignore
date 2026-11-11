@@ -6,6 +6,9 @@ debian/usr/local/bin/localsend-cli
 # 运行时上传目录（Web 模式自动创建）
 uploads/
 
+# Web 模式的运行期文件目录（用户上传的内容，不入库）
+uploads/
+
 # 构建 / 测试产物
 coverage.out
 *.deb

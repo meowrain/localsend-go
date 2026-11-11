@@ -793,6 +793,22 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 
 	logger.Success("File saved to:", filePath)
 	logger.Debugf("Upload finished: session=%s fileId=%s bytes=%d", sessID, fileID, written)
+	// 记录到 Web 页面的传输历史（内存环形缓冲，重启即清空）。
+	// filePath 是绝对路径，必须先把 uploads 也转成绝对路径再求相对值，
+	// 否则 filepath.Rel 在「绝对 vs 相对」时会直接报错，历史永远是空的。
+	if baseAbs, err := filepath.Abs(uploadBaseDir); err == nil {
+		if rel, relErr := filepath.Rel(baseAbs, filePath); relErr == nil &&
+			rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			recordHistory(historyEntry{
+				Direction: "receive",
+				FileName:  file.name,
+				Size:      written,
+				Peer:      snapshot.peerIP,
+				SavedPath: filepath.ToSlash(rel),
+				OK:        true,
+			})
+		}
+	}
 	// 标记该文件处理完毕；整张会话都完成后它会自动让位给下一个发送端（不再 409）
 	completed = true
 	w.WriteHeader(http.StatusOK)

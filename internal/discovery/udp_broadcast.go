@@ -68,17 +68,9 @@ func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {
 
 		shared.DevicesMutex.Lock()
 		shared.DiscoveredDevices[remoteAddr.IP.String()] = message
-
-		devices := make([]models.SendModel, 0, len(shared.DiscoveredDevices))
-		for ip, device := range shared.DiscoveredDevices {
-			devices = append(devices, models.SendModel{
-				IP:         ip,
-				DeviceName: device.Alias,
-				Port:       device.Port,
-				Protocol:   device.Protocol,
-			})
-		}
 		shared.DevicesMutex.Unlock()
+
+		devices := snapshotDevices()
 
 		logger.Debugf("Updated devices list: %+v", devices)
 

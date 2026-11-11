@@ -74,6 +74,49 @@ type model struct {
 	updates    <-chan []models.SendModel
 }
 
+// mergeDeviceUpdates 用最新快照重建设备列表，同时保持已有设备的显示顺序。
+//
+// 不能只做「新增合并」：发现层的快照会删掉过期设备，只增不减会让下线设备
+// 永远留在 TUI 里；同一 IP 的元数据（端口/协议/别名）也可能变化，必须允许覆盖。
+// newDevices 中同一 IP 出现多次时以最后一条为准。
+func mergeDeviceUpdates(current, newDevices []models.SendModel) []models.SendModel {
+	latest := make(map[string]models.SendModel, len(newDevices))
+	for _, device := range newDevices {
+		latest[device.IP] = device
+	}
+
+	out := make([]models.SendModel, 0, len(latest))
+	// 先按当前顺序保留仍在线的设备
+	for _, device := range current {
+		if updated, ok := latest[device.IP]; ok {
+			out = append(out, updated)
+			delete(latest, device.IP)
+		}
+	}
+	// 再把新出现的设备按快照顺序追加
+	for _, device := range newDevices {
+		if updated, ok := latest[device.IP]; ok {
+			out = append(out, updated)
+			delete(latest, device.IP)
+		}
+	}
+	return out
+}
+
+// sameDevices 判断两份设备列表是否完全一致（顺序敏感）。
+// 用于跳过无变化的重复渲染。
+func sameDevices(a, b []models.SendModel) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TickMsg 用于定期触发更新
 type TickMsg time.Time
 
@@ -110,31 +153,24 @@ func (m model) Update(msg bubbletea.Msg) (bubbletea.Model, bubbletea.Cmd) {
 	case TickMsg:
 		select {
 		case newDevices := <-m.updates:
-			if m.deviceMap == nil {
-				m.deviceMap = make(map[string]models.SendModel)
-			}
-
-			// 更新设备映射
-			changed := false
-			for _, device := range newDevices {
-				if _, exists := m.deviceMap[device.IP]; !exists {
+			// 整表替换而不是「只补新设备」：发现层会把离线设备从快照里删掉，
+			// 只增不减会让 TUI 继续展示已下线的设备；而且对端改端口/协议/别名后，
+			// 只补新增会把旧值一直留在列表里，选中后按旧端口发送。
+			// 顺序保持稳定：已在列表中的 IP 沿用原位置，新设备追加到末尾。
+			devices := mergeDeviceUpdates(m.devices, newDevices)
+			if !sameDevices(m.devices, devices) {
+				m.deviceMap = make(map[string]models.SendModel, len(devices))
+				m.sortedKeys = make([]string, 0, len(devices))
+				for _, device := range devices {
 					m.deviceMap[device.IP] = device
 					m.sortedKeys = append(m.sortedKeys, device.IP)
-					changed = true
 				}
-			}
-
-			// 只有在有新设备时才更新设备列表
-			if changed {
-				m.devices = make([]models.SendModel, 0, len(m.deviceMap))
-				for _, key := range m.sortedKeys {
-					if device, ok := m.deviceMap[key]; ok {
-						m.devices = append(m.devices, device)
-					}
-				}
+				m.devices = devices
 
 				// 确保光标不会超出设备列表范围
-				if m.cursor >= len(m.devices) {
+				if len(m.devices) == 0 {
+					m.cursor = 0
+				} else if m.cursor >= len(m.devices) {
 					m.cursor = len(m.devices) - 1
 				}
 			}

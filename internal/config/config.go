@@ -64,7 +64,14 @@ type Functions struct {
 	// SkipExisting 控制 204 优化：本次 prepare 的全部文件都已在 uploads/
 	// 且 sha256 一致时，回 204 让发送端跳过传输。默认开启，设为 false 可关闭。
 	SkipExisting *bool `yaml:"skip_existing"`
+	// WebUploadLimitMB 限制 Web 页面单次上传请求的大小（MiB）。
+	// 0 表示不限制；默认 4096（4 GiB），避免有人把磁盘写满。
+	// 只作用于 /send 与 /api/web/upload，不影响 LocalSend 协议接收。
+	WebUploadLimitMB *int `yaml:"web_upload_limit_mb"`
 }
+
+// DefaultWebUploadLimitMB 是 Web 上传大小上限的默认值（MiB）。
+const DefaultWebUploadLimitMB = 4096
 
 // Config 是配置文件的映射结构
 type Config struct {
@@ -92,10 +99,12 @@ func DefaultConfig() Config {
 // builtinDefault 是最后一层兜底默认值
 func builtinDefault() Config {
 	enabled := true
+	limit := DefaultWebUploadLimitMB
 	return Config{
 		Functions: Functions{
-			HttpFileServer:  &enabled,
-			LocalSendServer: &enabled,
+			HttpFileServer:   &enabled,
+			LocalSendServer:  &enabled,
+			WebUploadLimitMB: &limit,
 		},
 	}
 }
@@ -113,6 +122,18 @@ func (c Config) LocalSendServerEnabled() bool {
 // SkipExistingEnabled 返回是否启用「已存在且校验和一致就回 204」的优化。
 func (c Config) SkipExistingEnabled() bool {
 	return c.Functions.SkipExisting == nil || *c.Functions.SkipExisting
+}
+
+// WebUploadLimitBytes 返回 Web 上传单请求的字节上限，0 表示不限制。
+func (c Config) WebUploadLimitBytes() int64 {
+	if c.Functions.WebUploadLimitMB == nil {
+		return int64(DefaultWebUploadLimitMB) << 20
+	}
+	mb := *c.Functions.WebUploadLimitMB
+	if mb <= 0 {
+		return 0
+	}
+	return int64(mb) << 20
 }
 
 // SetPIN 设置接收端 PIN，供全局参数 --pin 覆盖配置里的值。
@@ -368,6 +389,10 @@ func applyDefaults(cfg *Config, def Config) {
 	if cfg.Functions.SkipExisting == nil && def.Functions.SkipExisting != nil {
 		v := *def.Functions.SkipExisting
 		cfg.Functions.SkipExisting = &v
+	}
+	if cfg.Functions.WebUploadLimitMB == nil && def.Functions.WebUploadLimitMB != nil {
+		v := *def.Functions.WebUploadLimitMB
+		cfg.Functions.WebUploadLimitMB = &v
 	}
 }
 

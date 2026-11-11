@@ -18,6 +18,7 @@ import (
 	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/handlers"
 	"github.com/meowrain/localsend-go/internal/pkg/server"
+	"github.com/meowrain/localsend-go/internal/tui"
 	"github.com/meowrain/localsend-go/internal/utils/logger"
 	"github.com/meowrain/localsend-go/static"
 	qrcode "github.com/skip2/go-qrcode"
@@ -312,6 +313,42 @@ func (m model) View() string {
 	return s.String()
 }
 
+// registerWebRoutes 注册 Web 页面与文件管理 API。
+//
+// 读接口（页面/列表/下载/预览/设备发现）只受 PIN 中间件保护；
+// 写接口（上传/删除/重命名/新建目录/发送/取消）额外要求 X-Web-Token，
+// 防止第三方网页借浏览器发起跨站写请求（见 handlers/web.go）。
+func registerWebRoutes(mux *http.ServeMux) {
+	// 页面与静态资源
+	mux.HandleFunc("/", handlers.WebAuth(handlers.IndexFileHandler))
+	mux.HandleFunc("/uploads/", handlers.WebAuth(handlers.FileServerHandler))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
+	mux.HandleFunc("/send", handlers.WebAuth(handlers.WebGuard(handlers.NormalSendHandler))) // 旧版上传入口
+
+	// 文件管理（读）
+	mux.HandleFunc("/api/web/files", handlers.WebAuth(handlers.WebListFiles))
+	mux.HandleFunc("/api/web/download", handlers.WebAuth(handlers.WebDownload))
+	mux.HandleFunc("/api/web/preview", handlers.WebAuth(handlers.WebPreview))
+	mux.HandleFunc("/api/web/thumb", handlers.WebAuth(handlers.WebThumb))
+
+	// 设备发现与发送（读 / 写分开）
+	mux.HandleFunc("/api/web/devices", handlers.WebAuth(handlers.WebDevices))
+	mux.HandleFunc("/api/web/send/status", handlers.WebAuth(handlers.WebSendStatus))
+	mux.HandleFunc("/api/web/history", handlers.WebAuth(handlers.WebHistory))
+	mux.HandleFunc("/api/web/qr", handlers.WebAuth(handlers.WebQRCode))
+	mux.HandleFunc("/api/web/share", handlers.WebAuth(handlers.WebShareInfo))
+
+	// 文件管理（写）
+	mux.HandleFunc("/api/web/upload", handlers.WebAuth(handlers.WebGuard(handlers.WebUpload)))
+	mux.HandleFunc("/api/web/upload/chunk", handlers.WebAuth(handlers.WebGuard(handlers.WebChunkUpload)))
+	mux.HandleFunc("/api/web/upload/chunk/status", handlers.WebAuth(handlers.WebChunkStatus))
+	mux.HandleFunc("/api/web/mkdir", handlers.WebAuth(handlers.WebGuard(handlers.WebMkdir)))
+	mux.HandleFunc("/api/web/rename", handlers.WebAuth(handlers.WebGuard(handlers.WebRename)))
+	mux.HandleFunc("/api/web/delete", handlers.WebAuth(handlers.WebGuard(handlers.WebDelete)))
+	mux.HandleFunc("/api/web/send", handlers.WebAuth(handlers.WebGuard(handlers.WebSend)))
+	mux.HandleFunc("/api/web/send/cancel", handlers.WebAuth(handlers.WebGuard(handlers.WebSendCancel)))
+}
+
 func WebServerMode(httpServer *http.ServeMux, port int) {
 	err := os.MkdirAll("uploads", 0o755)
 	if err != nil {
@@ -319,10 +356,9 @@ func WebServerMode(httpServer *http.ServeMux, port int) {
 		return
 	}
 	if config.ConfigData.HttpFileServerEnabled() {
-		httpServer.HandleFunc("/", handlers.IndexFileHandler)
-		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
-		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
-		httpServer.HandleFunc("/send", handlers.NormalSendHandler) // Upload handler
+		registerWebRoutes(httpServer)
+		// Web 端「发送到设备」依赖设备发现；启动一次即可（幂等）
+		handlers.EnsureDiscovery()
 	}
 	ips, _ := discovery.GetLocalIP()
 	localIP := ""
@@ -358,7 +394,7 @@ func ReceiveMode() {
 }
 
 func SendMode(filePath string) {
-	err := handlers.SendFile(filePath)
+	err := handlers.SendFile(filePath, tui.SelectDeviceInfo)
 	reportSendResult(err)
 }
 
@@ -372,7 +408,7 @@ func reportSendResult(err error) {
 
 // SendTextMode 把文本封装成虚拟 .txt 文件发送，复用 SendFile 的 prepare/upload 流程。
 func SendTextMode(text string) {
-	reportSendResult(handlers.SendText(text))
+	reportSendResult(handlers.SendText(text, tui.SelectDeviceInfo))
 }
 
 // runSendCommand 统一处理 `send` 子命令的参数解析、校验与分发。

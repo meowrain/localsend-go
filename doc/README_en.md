@@ -103,6 +103,45 @@ Linux systems require additional ping permission configuration:
 sudo setcap cap_net_raw=+ep localsend_cli
 ```
 
+## Web Mode
+
+```bash
+localsend-go web                # default port 53317
+localsend-go --port 8080 web
+```
+
+The terminal prints a QR code; open the page from any device on your LAN. The page supports:
+
+- **Upload**: drag & drop, file/folder picker (keeps the directory structure), paste to upload,
+  per-file progress and speed, cancelable. Files over 16 MiB are uploaded in 4 MiB chunks and
+  resume automatically after a reload. Conflict policy is overwrite / skip / auto-rename.
+- **Browse & manage**: breadcrumb navigation, search, sort by name/time/size, multi-select,
+  rename (with undo), move, delete (confirmation dialog listing the affected entries), create
+  folders, single-file download, and zip download for a selection or a whole directory.
+  Every action shows a confirmation, an in-flight button state and a toast; toasts can be
+  dismissed, pause their countdown on hover, and offer an inline "Undo".
+- **Preview**: images open in a built-in viewer with wheel/pinch/double-click zoom, drag to pan
+  (with edge clamping), rotation, fit-to-window / actual size, fullscreen, prev/next via keys or
+  swipe, and save. Audio/video, PDF and common text/code files preview inline. Dangerous types
+  (HTML, SVG as document, ...) are always forced to download.
+- **Send to device**: lists discovered LocalSend peers and sends files, directories or a text
+  snippet with live progress and cancel.
+- **Share**: QR code + link for the current page, and a transfer history panel.
+- Dark mode, mobile layout, and no CDN dependency (fully offline).
+
+Configuration (`config.yaml`):
+
+```yaml
+functions:
+  http_file_server: true     # disable to skip registering all web routes
+  pin: ""                    # when set, the web page/API requires a PIN
+  web_upload_limit_mb: 4096  # per-request upload limit in MiB, 0 = unlimited
+```
+
+> Security: web mode trusts your LAN by default (same as the LocalSend protocol). Set `pin`
+> (or `--pin`) to require a login; write operations additionally require the in-page CSRF
+> token. Never expose web mode directly to the public internet.
+
 ## Project Structure
 
 ```

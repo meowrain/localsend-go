@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{if .Path}}{{.Path}} · {{end}}LocalSendGo</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📤</text></svg>">
+  <link rel="stylesheet" href="/static/css/web.css">
+  <link rel="stylesheet" href="/static/fontawesome/css/all.min.css">
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo"><i class="fas fa-paper-plane"></i></span>
+      <span>
+        LocalSendGo
+        <small>{{if .Device}}{{.Device}}{{else}}局域网文件传输{{end}}</small>
+      </span>
+    </div>
+    <div class="spacer"></div>
+    {{if .PINEnabled}}<span class="tag"><i class="fas fa-lock"></i> PIN 已启用</span>{{end}}
+    <button class="icon-btn" id="btnSendPanel" title="发送到其它设备" aria-label="发送到其它设备">
+      <i class="fas fa-share-nodes"></i>
+    </button>
+    <button class="icon-btn" id="btnTheme" title="切换深色模式" aria-label="切换深色模式">
+      <i class="fas fa-moon"></i>
+    </button>
+    <button class="icon-btn" id="btnRefresh" title="刷新列表" aria-label="刷新列表">
+      <i class="fas fa-rotate"></i>
+    </button>
+    <button class="icon-btn" id="btnHistory" title="传输记录" aria-label="传输记录">
+      <i class="fas fa-clock-rotate-left"></i>
+    </button>
+    <button class="icon-btn" id="btnSharePage" title="分享这个页面" aria-label="分享这个页面">
+      <i class="fas fa-qrcode"></i>
+    </button>
+  </header>
+
+  <!-- 上传 -->
+  <section class="card">
+    <div class="card-body">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button"
+           aria-label="拖拽文件到此处，或点击选择文件">
+        <div class="big-icon"><i class="fas fa-cloud-arrow-up"></i></div>
+        <h3>拖拽文件到此处上传</h3>
+        <p>也可以点击这里选择文件，或使用下方按钮</p>
+        <div class="hint" id="uploadHint">
+          支持多文件与整个文件夹，保留目录结构
+          {{if .UploadLimitMB}}· 单次上限 {{.UploadLimitMB}} MiB{{end}}
+          · 支持 Ctrl/⌘+V 粘贴上传
+        </div>
+      </div>
+
+      <div class="upload-actions">
+        <button class="btn primary" id="btnPickFiles">
+          <i class="fas fa-file-arrow-up"></i> 选择文件
+        </button>
+        <button class="btn" id="btnPickFolder">
+          <i class="fas fa-folder-open"></i> 选择文件夹
+        </button>
+        <span class="tag" id="targetDirTag">
+          <i class="fas fa-folder-tree"></i> 上传到 {{if .Path}}/{{.Path}}{{else}}根目录{{end}}
+        </span>
+        <div style="flex:1"></div>
+        <button class="btn sm ghost hidden" id="btnClearQueue">
+          <i class="fas fa-broom"></i> 清空队列
+        </button>
+      </div>
+
+      <input type="file" id="fileInput" multiple hidden>
+      <input type="file" id="folderInput" webkitdirectory multiple hidden>
+
+      <div class="upload-queue" id="uploadQueue"></div>
+    </div>
+  </section>
+
+  <!-- 文件列表 -->
+  <section class="card">
+    <div class="card-head">
+      <nav class="breadcrumb" id="breadcrumb" aria-label="路径">
+        <a href="/"><i class="fas fa-house"></i></a>
+        {{range .Breadcrumbs}}
+          <span class="sep">/</span>
+          <a href="/{{.Path}}/">{{.Name}}</a>
+        {{end}}
+      </nav>
+    </div>
+
+    <div class="toolbar">
+      <input class="search" id="searchInput" type="search" placeholder="搜索当前目录…"
+             aria-label="搜索当前目录">
+      <label class="view-field" title="视图">
+        <i class="fas fa-table-cells-large" aria-hidden="true"></i>
+        <select id="viewSelect" aria-label="视图">
+          <option value="xlarge">超大图标</option>
+          <option value="large">大图标</option>
+          <option value="medium">中图标</option>
+          <option value="small">小图标</option>
+          <option value="list">列表</option>
+          <option value="details">详细信息</option>
+          <option value="tiles">平铺</option>
+          <option value="content">内容</option>
+        </select>
+      </label>
+      <select id="sortSelect" aria-label="排序方式" title="排序方式">
+        <option value="name-asc">名称 ↑</option>
+        <option value="name-desc">名称 ↓</option>
+        <option value="time-desc">最新修改</option>
+        <option value="time-asc">最早修改</option>
+        <option value="size-desc">大小 ↓</option>
+        <option value="size-asc">大小 ↑</option>
+      </select>
+      <span class="count" id="selectionInfo"></span>
+      <div style="flex:1"></div>
+      <button class="btn sm" id="btnNewFolder" title="新建文件夹">
+        <i class="fas fa-folder-plus"></i><span class="label">新建</span>
+      </button>
+      <button class="btn sm hidden" id="btnDownloadSelected" title="打包下载所选">
+        <i class="fas fa-download"></i><span class="label">下载</span>
+      </button>
+      <button class="btn sm danger hidden" id="btnDeleteSelected" title="删除所选">
+        <i class="fas fa-trash"></i><span class="label">删除</span>
+      </button>
+    </div>
+
+    <ul class="file-list" id="fileList">
+      {{if .Parent}}
+      <li class="file-row dir" data-name=".." data-path="{{.Parent}}" data-dir="1" data-action="up">
+        <span></span>
+        <div class="file-main">
+          <span class="file-icon"><i class="fas fa-arrow-up"></i></span>
+          <span class="file-name">..</span>
+        </div>
+        <span class="file-size"></span>
+        <span class="file-actions"></span>
+      </li>
+      {{end}}
+      {{range .Files}}
+      <li class="file-row {{if .IsDir}}dir{{end}}"
+          data-name="{{.Name}}" data-path="{{.Path}}" data-dir="{{if .IsDir}}1{{else}}0{{end}}"
+          data-size="{{.Size}}" data-time="{{.ModTime}}" data-mime="{{.Mime}}">
+        <input type="checkbox" class="check" aria-label="选择 {{.Name}}">
+        <div class="file-main">
+          <span class="file-icon"><i class="fas {{.Icon}}"></i></span>
+          <div style="min-width:0">
+            <div class="file-name" title="{{.Name}}">{{.Name}}</div>
+            <div class="file-sub">{{if .IsDir}}文件夹{{else}}{{.ModTime}}{{end}}</div>
+          </div>
+        </div>
+        <span class="file-size">{{if .IsDir}}{{else}}{{.SizeStr}}{{end}}</span>
+        <span class="file-actions">
+          {{if .IsDir}}
+          <button class="icon-btn ghost" data-act="open" title="打开"><i class="fas fa-arrow-right"></i></button>
+          {{else}}
+          <button class="icon-btn ghost" data-act="preview" title="预览"><i class="fas fa-eye"></i></button>
+          <button class="icon-btn ghost" data-act="download" title="下载"><i class="fas fa-download"></i></button>
+          {{end}}
+          <button class="icon-btn ghost" data-act="rename" title="重命名"><i class="fas fa-pen"></i></button>
+          <button class="icon-btn ghost" data-act="share" title="复制链接"><i class="fas fa-link"></i></button>
+          <button class="icon-btn ghost" data-act="send" title="发送到设备"><i class="fas fa-share-nodes"></i></button>
+          <button class="icon-btn ghost danger" data-act="delete" title="删除"><i class="fas fa-trash"></i></button>
+        </span>
+      </li>
+      {{end}}
+    </ul>
+
+    <div class="empty {{if or .Files .Parent}}hidden{{end}}" id="emptyState">
+      <div class="big-icon"><i class="fas fa-inbox"></i></div>
+      <p>这个目录还是空的，拖入文件即可开始。</p>
+    </div>
+
+    <noscript>
+      <div class="empty">
+        <p>浏览器禁用了 JavaScript：当前页面仍可浏览与下载文件，但上传、删除、搜索等功能不可用。</p>
+      </div>
+    </noscript>
+  </section>
+</div>
+
+<!-- 通用模态框 -->
+<div class="modal-backdrop hidden" id="modalBackdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-head">
+      <h3 id="modalTitle">标题</h3>
+      <button class="icon-btn" id="modalClose" aria-label="关闭"><i class="fas fa-xmark"></i></button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<!-- 图片查看器 -->
+<div class="viewer hidden" id="imageViewer" role="dialog" aria-modal="true" aria-label="图片预览">
+  <div class="viewer-bar">
+    <div class="viewer-title">
+      <span class="viewer-name" id="viewerName"></span>
+      <span class="viewer-meta" id="viewerMeta"></span>
+    </div>
+    <div class="viewer-tools">
+      <button class="icon-btn" data-v="prev" title="上一张（←）" aria-label="上一张"><i class="fas fa-chevron-left"></i></button>
+      <span class="viewer-count" id="viewerCount">1 / 1</span>
+      <button class="icon-btn" data-v="next" title="下一张（→）" aria-label="下一张"><i class="fas fa-chevron-right"></i></button>
+      <span class="viewer-sep"></span>
+      <button class="icon-btn" data-v="zoom-out" title="缩小（-）" aria-label="缩小"><i class="fas fa-magnifying-glass-minus"></i></button>
+      <button class="icon-btn" data-v="zoom-in" title="放大（+）" aria-label="放大"><i class="fas fa-magnifying-glass-plus"></i></button>
+      <button class="icon-btn" data-v="zoom-fit" title="适应窗口（0）" aria-label="适应窗口"><i class="fas fa-compress"></i></button>
+      <button class="icon-btn" data-v="zoom-actual" title="原始大小（1）" aria-label="原始大小"><i class="fas fa-1"></i></button>
+      <span class="viewer-sep"></span>
+      <button class="icon-btn" data-v="rotate-left" title="向左旋转（Shift+R）" aria-label="向左旋转"><i class="fas fa-rotate-left"></i></button>
+      <button class="icon-btn" data-v="rotate-right" title="向右旋转（R）" aria-label="向右旋转"><i class="fas fa-rotate-right"></i></button>
+      <button class="icon-btn" data-v="fullscreen" title="全屏（F）" aria-label="全屏"><i class="fas fa-expand"></i></button>
+      <button class="icon-btn" data-v="download" title="下载（D）" aria-label="下载"><i class="fas fa-download"></i></button>
+      <button class="icon-btn" data-v="close" title="关闭（Esc）" aria-label="关闭"><i class="fas fa-xmark"></i></button>
+    </div>
+  </div>
+  <div class="viewer-stage" id="viewerStage">
+    <div class="viewer-loading" id="viewerLoading"><i class="fas fa-spinner fa-spin"></i></div>
+    <div class="viewer-error hidden" id="viewerError"></div>
+    <img id="viewerImg" alt="" draggable="false">
+  </div>
+  <div class="viewer-hint">滚轮 / 双指 / 双击缩放 · 拖动平移 · ← → 切换 · Esc 关闭</div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+  window.__LS__ = {
+    path: {{.Path}},
+    parent: {{.Parent}},
+    token: {{.Token}},
+    uploadLimitMB: {{.UploadLimitMB}},
+    pinEnabled: {{.PINEnabled}}
+  };
+</script>
+<script src="/static/js/web.js"></script>
+</body>
+</html>

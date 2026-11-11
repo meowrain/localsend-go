@@ -87,7 +87,7 @@ func TestSha256OfBytes(t *testing.T) {
 
 func TestSendTextRejectsEmpty(t *testing.T) {
 	for _, text := range []string{"", "  ", "\n\t"} {
-		if err := SendText(text); err != ErrEmptyText {
+		if err := SendText(text, nil); err != ErrEmptyText {
 			t.Fatalf("expected ErrEmptyText for %q, got %v", text, err)
 		}
 	}
