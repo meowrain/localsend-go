@@ -430,6 +430,7 @@ func showHelp() {
 	fmt.Println("  help                Display this help information")
 	fmt.Println("Options:")
 	fmt.Println("  --help              Display this help information")
+	fmt.Println("  --version           Display version information")
 	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
 	fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
 	fmt.Println("  --pin=<pin>         Require this PIN on *this* device's receiver (overrides functions.pin)")
@@ -507,6 +508,11 @@ func main() {
 	// --port 也无法影响已经启动的监听，二者实际都不生效。
 	flag.Usage = showHelp
 	flag.Parse()
+	// --version 在加载配置之前处理：它只依赖构建期注入的信息。
+	if showVersion {
+		printVersion()
+		os.Exit(0)
+	}
 	for _, arg := range os.Args {
 		if arg == "--help" || arg == "-h" {
 			showHelp()
