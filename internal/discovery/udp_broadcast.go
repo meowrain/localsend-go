@@ -47,15 +47,24 @@ func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {
 			continue
 		}
 
-		// 验证必要字段
-		if message.Alias == "" || message.DeviceType == "" {
-			logger.Errorf("Invalid broadcast message from %s: missing required fields", remoteAddr.IP.String())
+		// 只校验 alias：协议 3.1 的公告里 alias 是唯一的必填项，
+		// deviceModel / deviceType 都标着 nullable（官方实现是 Option<DeviceType>）。
+		// 之前把 deviceType 当必填，会把官方 App 发来的「无 deviceType」公告整个丢掉。
+		if message.Alias == "" {
+			logger.Errorf("Invalid broadcast message from %s: missing alias", remoteAddr.IP.String())
 			continue
 		}
+		// 协议 7.1：未知/缺失的设备类型回退 desktop，与官方实现一致。
+		message.DeviceType = normalizeDeviceType(message.DeviceType)
 
 		message.LastSeen = time.Now()
 
 		logger.Debugf("Parsed message from %s: %+v", remoteAddr.IP.String(), message)
+
+		// 协议 3.1：收到 announce == true 的公告后要向来源回发 POST /v2/register，
+		// 完成双向确认。回发失败只记日志，不影响下面的设备列表更新与主循环。
+		// 放到 goroutine 里是因为 HTTP 回发可能阻塞数百毫秒，不能卡住收包循环。
+		go replyToAnnouncement(remoteAddr.IP.String(), message, postbackRegister)
 
 		shared.DevicesMutex.Lock()
 		shared.DiscoveredDevices[remoteAddr.IP.String()] = message
