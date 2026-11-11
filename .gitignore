@@ -1,5 +1,10 @@
 bin/
-!debian/usr/local/bin/
+
+# deb 打包的暂存二进制：CI 在打包前从 bin/ 拷入，不入库（约 14MB）
+debian/usr/local/bin/localsend-cli
+
+# 运行时上传目录（Web 模式自动创建）
+uploads/
 
 # 构建 / 测试产物
 coverage.out
