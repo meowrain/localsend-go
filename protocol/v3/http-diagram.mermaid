@@ -1,0 +1,129 @@
+sequenceDiagram
+    participant Sender as Sender (HTTP Client)
+    participant Receiver as Receiver (HTTP Server)
+
+    Note over Sender,Receiver: Discovery Phase
+    alt Multicast Discovery
+        Sender->>Receiver: UDP Multicast Announcement
+        Note over Sender: {alias, version: "3.0", deviceModel, deviceType, fingerprint, port, protocol, announce: true}
+        Receiver->>Sender: POST /api/localsend/v3/register
+        Note over Receiver: {alias, version: "3.0", deviceModel, deviceType, fingerprint, port, protocol, download}
+    else HTTP Discovery (Legacy)
+        Sender->>Receiver: POST /api/localsend/v3/register
+        Note over Sender: {alias, version: "3.0", deviceModel, deviceType, fingerprint, port, protocol, download}
+        Receiver-->>Sender: 200 OK
+        Note over Receiver: {alias, version: "3.0", deviceModel, deviceType, fingerprint, download}
+    end
+
+    Note over Sender,Receiver: Nonce Exchange
+    Sender->>Receiver: POST /api/localsend/v3/nonce
+    Note over Sender: {nonce: sender_nonce_base64}
+    Note over Receiver: Validate nonce format & content
+    Note over Receiver: Store sender_nonce in received_nonce_map
+    Note over Receiver: Generate receiver_nonce
+    Note over Receiver: Store receiver_nonce in generated_nonce_map
+    Receiver-->>Sender: 200 OK
+    Note over Receiver: {nonce: receiver_nonce_base64}
+    Note over Sender,Receiver: Combined nonce = sender_nonce || receiver_nonce
+
+    Note over Sender,Receiver: Token Exchange (Re-register with Auth)
+    Sender->>Receiver: POST /api/localsend/v3/register
+    Note over Sender: {alias, version: "3.0", deviceModel, deviceType, fingerprint, port, protocol, download, token: signed_token_with_nonce}
+    Note over Receiver: Retrieve stored nonces
+    Note over Receiver: Verify sender token signature with nonce
+
+    alt Token verification fails
+        Receiver-->>Sender: 401 Unauthorized
+        Note over Receiver: {status: "INVALID_SIGNATURE"}
+        Note over Sender,Receiver: Connection terminated
+    else Token valid, PIN required
+        Receiver-->>Sender: 401 Unauthorized
+        Note over Receiver: {status: "PIN_REQUIRED", alias, version, deviceModel, deviceType, fingerprint, download, token: receiver_signed_token}
+    else Token valid, no PIN required
+        Receiver-->>Sender: 200 OK
+        Note over Receiver: {status: "OK", alias, version, deviceModel, deviceType, fingerprint, download, token: receiver_signed_token}
+    end
+    Note over Sender: Verify receiver token with nonce
+
+    opt Receiver requires PIN
+        loop Until correct PIN or max attempts
+            Sender->>Receiver: POST /api/localsend/v3/prepare-upload?pin=123456
+            Note over Sender: {info: {...}, files: {...}}
+            alt Correct PIN
+                Note over Receiver: PIN verified, proceed
+            else Wrong PIN
+                Receiver-->>Sender: 401 Unauthorized
+                Note over Receiver: {error: "Invalid PIN"}
+            else Too many attempts
+                Receiver-->>Sender: 429 Too Many Requests
+                Note over Sender,Receiver: Connection terminated
+            end
+        end
+    end
+
+    Note over Sender,Receiver: File Transfer Preparation
+    Sender->>Receiver: POST /api/localsend/v3/prepare-upload?pin=123456
+    Note over Sender: {info: {alias, version, deviceModel, deviceType, fingerprint, port, protocol, download}, files: {fileId: {id, fileName, size, fileType, sha256, preview, metadata}}}
+    Note over Receiver: Validate session/token
+    Note over Receiver: User reviews file list
+
+    alt User requests pairing
+        Receiver-->>Sender: 202 Accepted
+        Note over Receiver: {status: "PAIR_REQUESTED", publicKey: receiver_public_key, sessionId}
+        Note over Sender: Verify receiver token with public key
+        Note over Sender: Prompt user for pairing approval
+
+        alt Sender accepts pairing
+            Sender->>Receiver: POST /api/localsend/v3/pair
+            Note over Sender: {sessionId, accepted: true, publicKey: sender_public_key}
+            Note over Receiver: Verify sender token with provided public key
+            Note over Receiver: Store paired public key
+            Receiver-->>Sender: 200 OK
+            Note over Receiver: {status: "OK", files: {fileId: fileToken}}
+        else Sender declines pairing
+            Sender->>Receiver: POST /api/localsend/v3/pair
+            Note over Sender: {sessionId, accepted: false}
+            Receiver-->>Sender: 200 OK
+            Note over Receiver: {status: "PAIR_DECLINED"}
+            Note over Sender,Receiver: Connection terminated
+        end
+    else User declines transfer
+        Receiver-->>Sender: 403 Forbidden
+        Note over Sender,Receiver: Connection terminated
+    else User accepts transfer (all or partial)
+        Receiver-->>Sender: 200 OK
+        Note over Receiver: {sessionId, files: {fileId: fileToken}}
+        Note over Receiver: Generate unique token per accepted file
+    else No files selected
+        Receiver-->>Sender: 204 No Content
+    end
+
+    Note over Sender,Receiver: Upload Files
+    loop For each accepted file
+        Sender->>Receiver: POST /api/localsend/v3/upload?sessionId={sessionId}&fileId={fileId}&token={fileToken}
+        Note over Sender: Binary file data in request body
+        Note over Receiver: Validate sessionId, fileId, and fileToken
+        Note over Receiver: Validate sender IP matches session
+
+        alt Valid token and session
+            Note over Receiver: Stream and save file
+            Receiver-->>Sender: 200 OK
+        else Invalid token or IP
+            Receiver-->>Sender: 403 Forbidden
+        else Session conflict
+            Receiver-->>Sender: 409 Conflict
+        end
+    end
+
+    Note over Sender,Receiver: Transfer Complete or Cancel
+    alt Transfer completed successfully
+        Note over Sender,Receiver: All files uploaded
+    else Sender cancels
+        Sender->>Receiver: POST /api/localsend/v3/cancel?sessionId={sessionId}
+        Receiver-->>Sender: 200 OK
+        Note over Receiver: Clean up session & tokens
+    end
+
+    Note over Sender,Receiver: Session Cleanup
+    Note over Receiver: Invalidate sessionId and file tokens
+    Note over Receiver: Clear nonce mappings

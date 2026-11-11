@@ -1,0 +1,104 @@
+sequenceDiagram
+    participant Sender
+    participant Receiver
+    participant SignalingServer
+
+    Note over Sender,Receiver: WebRTC Connection Setup
+    Sender->>SignalingServer: Create Offer (SDP)
+    SignalingServer->>Receiver: Forward Offer
+    Receiver->>SignalingServer: Create Answer (SDP)
+    SignalingServer-->>Sender: Forward Answer
+    Note over Sender,Receiver: Status: SdpExchanged
+
+    Note over Sender,Receiver: Data Channel Opens
+
+    Note over Sender,Receiver: Nonce Exchange
+    Sender->>Receiver: RTCNonceMessage {nonce: sender_nonce}
+    Receiver-->>Sender: RTCNonceMessage {nonce: receiver_nonce}
+    Note over Sender,Receiver: Combined nonce = sender_nonce || receiver_nonce
+
+    Note over Sender,Receiver: Token Exchange (Authentication)
+    Sender->>Receiver: RTCTokenRequest {token: signed_token}
+    Note over Receiver: Verify token signature (optional)
+    alt Token verification fails
+        Receiver-->>Sender: RTCTokenResponse::InvalidSignature
+        Note over Sender: Connection closed
+    else Token valid, PIN required
+        Receiver-->>Sender: RTCTokenResponse::PinRequired {token}
+    else Token valid, no PIN required
+        Receiver-->>Sender: RTCTokenResponse::Ok {token}
+    end
+
+    opt Receiver requires PIN
+        Note over Sender: Status: PinRequired
+        loop Until correct PIN or max attempts
+            Sender->>Receiver: RTCPinMessage {pin}
+            alt Correct PIN
+                Receiver-->>Sender: RTCPinReceivingResponse::Ok
+            else Wrong PIN
+                Receiver-->>Sender: RTCPinReceivingResponse::PinRequired
+            else Too many attempts
+                Receiver-->>Sender: RTCPinReceivingResponse::TooManyAttempts
+                Note over Sender,Receiver: Status: TooManyAttempts (closed)
+            end
+        end
+    end
+
+    Note over Sender,Receiver: Sender PIN Verification
+    alt Sender requires PIN
+        Note over Receiver: Status: PinRequired
+        loop Until correct PIN or max attempts
+            Receiver->>Sender: RTCPinMessage {pin}
+            alt Correct PIN
+                Sender-->>Receiver: RTCPinSendingResponse::Ok {files}
+            else Wrong PIN
+                Sender-->>Receiver: RTCPinSendingResponse::PinRequired
+            else Too many attempts
+                Sender-->>Receiver: RTCPinSendingResponse::TooManyAttempts
+                Note over Sender,Receiver: Status: TooManyAttempts (closed)
+            end
+        end
+    else No PIN required
+        Sender->>Receiver: RTCPinSendingResponse::Ok {files}
+    end
+
+    Note over Sender,Receiver: Status: Connected
+
+    Note over Receiver: User selects files
+    alt User declines transfer
+        Receiver->>Sender: RTCFileListResponse::Declined
+        Note over Sender,Receiver: Status: Declined (closed)
+    else User requests pairing
+        Receiver->>Sender: RTCFileListResponse::Pair {publicKey}
+        Note over Sender: Verify token with public key
+        alt User accepts pairing
+            Sender-->>Receiver: RTCPairResponse::Ok {publicKey}
+            Receiver->>Sender: RTCFileListResponse::Ok {file_tokens}
+        else User declines pairing
+            Sender-->>Receiver: RTCPairResponse::PairDeclined
+            Note over Sender,Receiver: Connection closed
+        else Invalid signature
+            Sender-->>Receiver: RTCPairResponse::InvalidSignature
+            Note over Sender,Receiver: Connection closed
+        end
+    else User accepts transfer
+        Receiver->>Sender: RTCFileListResponse::Ok {file_tokens}
+    end
+
+    Note over Sender,Receiver: File Transfer
+    loop For each selected file
+        Sender->>Receiver: RTCSendFileHeaderRequest {id, token}
+        Note over Receiver: Validate token
+        loop Send file in chunks
+            Sender->>Receiver: Binary Data (16 KiB chunks)
+        end
+        Sender->>Receiver: Delimiter ("0")
+        Note over Receiver: Process and save file
+        Receiver-->>Sender: RTCSendFileResponse {id, success, error?}
+    end
+
+    Note over Sender,Receiver: Transfer Complete
+    Sender->>Receiver: Final Delimiter
+    Note over Sender,Receiver: Status: Finished
+    Note over Sender: Close data channel & peer connection
+    Note over Receiver: Close peer connection
