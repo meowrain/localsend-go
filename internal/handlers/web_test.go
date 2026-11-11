@@ -19,6 +19,7 @@ import (
 
 	"github.com/meowrain/localsend-go/internal/config"
 	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/meowrain/localsend-go/static"
 )
 
 // webTestServer 起一个带 Web 路由的测试服务（未启用 PIN）。
@@ -29,6 +30,8 @@ func webTestServer(t *testing.T) *httptest.Server {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", WebAuth(IndexFileHandler))
+	// 静态资源与生产路由一致：/static/ 前缀剥离后从内嵌文件系统取
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
 	mux.HandleFunc("/uploads/", WebAuth(FileServerHandler))
 	mux.HandleFunc("/api/web/files", WebAuth(WebListFiles))
 	mux.HandleFunc("/api/web/download", WebAuth(WebDownload))
@@ -915,7 +918,7 @@ func TestWebThemesCSS(t *testing.T) {
 	}
 	// 旧的 data-theme="dark" 单段式选择器已不再使用
 	if strings.Contains(css, `:root[data-theme="dark"]`) {
-		t.Errorf("css still uses the legacy single-axis data-theme="dark" selector")
+		t.Errorf(`css still uses the legacy single-axis data-theme="dark" selector`)
 	}
 	// 明暗由 JS 解析后写到 data-mode，样式表里不再需要明暗媒体查询
 	if strings.Contains(css, "@media (prefers-color-scheme") {
