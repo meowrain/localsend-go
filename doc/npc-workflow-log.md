@@ -78,9 +78,21 @@ GOOS=windows/amd64 darwin/arm64 linux/arm64 go build   OK
 端到端（真实二进制 + curl）：中文文件名上传 200、错误 token 403、`../` 路径穿越 403、
 `--config` 生成到指定路径、`--port` 生效、广播 alias 与配置一致。
 
+## 后续：合回 main 与协议适配
+
+2026-11-11 已把 `test/npc-issues` 整体 `--no-ff` 合回 `main`（提交 `01a1741`）并推送到 GitHub / CNB。
+
+对照 `protocol/` 下的 LocalSend v2.2 规范复核后，确认 v3 尚未定稿（官方 `constants.dart` 仍是
+`protocolVersion = '2.2'`，App 全部使用 `LsHttpClientVersion.v2`，服务端 v3 的 register 标注
+`TODO: not wired up yet`，协议仓库 `v3/` 只有两张 mermaid 图），因此本轮只对齐 v2.2，拆成两个 Issue：
+
+| Issue | 范围 | 优先级 | 分支 |
+|---|---|---|---|
+| #9 | 设备发现对齐（`/v2/register`、UDP 回 register、版本号 2.2、`download` 置 false、`fileType` 改 MIME、补齐 401/409/429/422） | P0 | `fix/protocol-discovery` |
+| #10 | 接收端 v2.1/2.2 能力（PIN、metadata、`sha256` 校验返回 422、204/409） | P1 | 等 #9 合并后开始 |
+
 ## 遗留
 
-- `test/npc-issues` 尚未合回 `main`。
 - PR #8 审查提到的「`Port` 非法时无日志」等 P2/P3 建议未全部采纳。
 - 同名文件仍会覆盖（PR #5 已列为已知限制，建议单独开 issue）。
 - `internal/tui` 的 `TestSelectDevice` 在无 TTY 环境仍需 skip。
