@@ -89,10 +89,32 @@ GOOS=windows/amd64 darwin/arm64 linux/arm64 go build   OK
 | Issue | 范围 | 优先级 | 分支 |
 |---|---|---|---|
 | #9 | 设备发现对齐（`/v2/register`、UDP 回 register、版本号 2.2、`download` 置 false、`fileType` 改 MIME、补齐 401/409/429/422） | P0 | `fix/protocol-discovery` |
-| #10 | 接收端 v2.1/2.2 能力（PIN、metadata、`sha256` 校验返回 422、204/409） | P1 | 等 #9 合并后开始 |
+| #10 | 接收端 v2.1/2.2 能力（PIN、metadata、`sha256` 校验返回 422、204/409） | P1 | `feat/protocol-receive-v22` |
+
+两个 Issue 均已完成并合并：PR #11 → `a967b04`，PR #12 → `eaf4128`。
+
+## 两轮协议适配的审查记录
+
+每轮都做了「独立 worktree 跑测试 + 真实二进制端到端 + 临时测试复现缺陷」三步，临时测试均未提交。
+
+**PR #11（设备发现）三轮**
+
+1. 阻断 ×3：指纹是常量 `"random-string"`，两台机器互判为自己 → 回发被跳过；`deviceType` 当必填把官方公告整个丢弃；HTTP 探测成功后不回填 scheme，发送端回退 https。
+2. 阻断 ×1：修 `announce` 时把它改成 `false`，而 `shared.Message` 同时是 UDP 公告载荷 → 公告不再触发任何对端响应，双向发现两个方向全断。
+3. 通过。关键修法是把「公告」和「register 请求体」拆成两份载荷（`shared.Message` / `shared.RegisterRequest()`）。
+
+**PR #12（接收端能力）三轮**
+
+1. 阻断 ×1：传输中断后文件不落终态，会话永久占用，其他设备 prepare 永远 409；高 ×1：已完成会话允许 token 重放覆盖文件；中 ×1：`--pin` 把本机 PIN 与对端 PIN 混成一个值。
+2. 阻断 ×1：`pending` 表用 `sessionId+fileId` 做 key，同一文件的并发上传互相覆盖终态——失败请求会把已成功落盘的文件标成 `failed=true`，而 `failed` 正是「允许重传」的信号，重放防护被打开；并发测试实测 8 个请求全部 200。
+3. 通过。修法是 `inProgress` 状态机 + 请求实例级记账 key，`finishUpload` 在同一把锁内完成「读结论 → 落终态 → 清 inProgress」。
+
+共同教训：这类缺陷单线程用例查不出来，必须用并发 + 断言「状态与磁盘事实一致」，而不是只断言状态码。
 
 ## 遗留
 
+- #13 `logger.checkLogger()` 数据竞争（既有缺陷，`main` 上就存在，只是并发测试变多后才暴露）。
+- #14 被放弃的会话会一直占用通道（与官方行为一致，建议加空闲超时）。
 - PR #8 审查提到的「`Port` 非法时无日志」等 P2/P3 建议未全部采纳。
 - 同名文件仍会覆盖（PR #5 已列为已知限制，建议单独开 issue）。
 - `internal/tui` 的 `TestSelectDevice` 在无 TTY 环境仍需 skip。
