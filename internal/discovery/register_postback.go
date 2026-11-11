@@ -15,9 +15,6 @@ import (
 	"github.com/meowrain/localsend-go/internal/utils/logger"
 )
 
-// registerPath 是协议 3.1 / 3.2 的双向发现路由。
-const registerPath = "/api/localsend/v2/register"
-
 // RegisterPoster 向来源设备回发一次 register 请求。
 // 抽成函数类型是为了让单测可以替换成只记录调用的假实现，不必真的发包。
 type RegisterPoster func(peer registerPeer) error
@@ -124,9 +121,19 @@ func postRegister(peer registerPeer) error {
 
 // replyToAnnouncement 在收到 UDP 公告后决定是否回发 register。
 // poster 为 nil 时使用默认实现；回发失败只记录日志，不影响调用方的发现主循环。
+// 同一条公告（来源 IP + 指纹）在 postbackTTL 内只会回发一次。
 func replyToAnnouncement(ip string, message models.BroadcastMessage, poster RegisterPoster) {
+	replyToAnnouncementDedup(&lastPostback, ip, message, poster)
+}
+
+// replyToAnnouncementDedup 是 replyToAnnouncement 的实现，去重表可注入以便单测。
+func replyToAnnouncementDedup(dedup *postbackDeduper, ip string, message models.BroadcastMessage, poster RegisterPoster) {
 	if !shouldPostRegister(ip, message) {
 		logger.Debugf("Skip register postback to %s (announce=%v)", ip, message.Announce)
+		return
+	}
+	if dedup != nil && !dedup.allow(postbackDedupKey(ip, message.Fingerprint)) {
+		logger.Debugf("Skip duplicate register postback to %s (fingerprint=%q)", ip, message.Fingerprint)
 		return
 	}
 	if poster == nil {

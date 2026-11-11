@@ -12,19 +12,9 @@ import (
 // maxErrorBodyBytes 限制读取错误响应体的长度，避免对端返回巨大内容时把内存吃满。
 const maxErrorBodyBytes = 4 << 10
 
-// 协议里定义的错误码（见 protocol/README.md 的 4.1 与 4.2 错误表）。
-// 2.1 新增了 401 / 409 / 429，2.2 又给 upload 加了 422，之前只处理 400 / 403 / 500，
-// 其余状态码会掉进「unknown status code」，用户看不到真实原因。
-const (
-	statusFinished       = 204 // prepare-upload: 无需传输
-	statusBadRequest     = 400 // invalid body / missing parameters
-	statusPINRequired    = 401 // PIN required / Invalid PIN
-	statusRejected       = 403 // rejected / invalid token or IP
-	statusSessionBlocked = 409 // blocked by another session
-	statusChecksum       = 422 // checksum mismatch (sha256)
-	statusTooManyReqs    = 429 // too many requests
-	statusReceiverError  = 500 // unknown error by receiver
-)
+// 错误码映射直接写在下面的 switch 里（protocol/README.md 4.1 / 4.2 错误表）：
+// 之前还定义了一组 statusFinished / statusPINRequired 之类的常量，但没人引用，
+// 只是把同一份映射写了两遍，删掉避免两处漂移。
 
 // statusCodeError 表示对端返回了非预期的 HTTP 状态码。
 // 带上 Message 是为了让上层能把对端的说明透出来；

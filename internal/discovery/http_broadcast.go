@@ -1,12 +1,8 @@
 package discovery
 
 import (
-	"bytes"
-	"crypto/tls"
+	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"sync"
 	"time"
 
@@ -32,71 +28,28 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 			continue
 		}
 
+		client := newProbeClient()
 		var wg sync.WaitGroup
 		for _, ip := range ips {
 			wg.Add(1)
 			go func(ip string) {
 				defer wg.Done()
 
-				// 探测目标地址：先按本机使用的协议（本项目默认 http）试，失败再退回 https。
-				// 之前写死 https://<ip>:53317，导致明文 http 的对端（例如另一个 localsend-go）
-				// 在多播不可用的网络里完全发现不到。
-				schemes := []string{shared.Message.Protocol, "https"}
-				if schemes[0] == "" || schemes[0] == "https" {
-					schemes = []string{"https"}
-				}
-				client := &http.Client{
-					Timeout: httpTimeout,
-					Transport: &http.Transport{
-						TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-					},
-				}
-
-				var resp *http.Response
-				var err error
-				for _, scheme := range schemes {
-					url := fmt.Sprintf("%s://%s:%d/api/localsend/v2/register", scheme, ip, broadcastPort)
-					req, reqErr := http.NewRequest("POST", url, bytes.NewBuffer(data))
-					if reqErr != nil {
-						logger.Errorf("Failed to create HTTP request for %s: %v", ip, reqErr)
-						return
-					}
-					req.Header.Set("Content-Type", "application/json")
-					resp, err = client.Do(req)
-					if err == nil {
-						break
-					}
-				}
+				device, err := probeRegister(context.Background(), client, ip, data, shared.Message.Protocol)
 				if err != nil {
+					logger.Debugf("HTTP probe to %s failed: %v", ip, err)
 					return
 				}
-				defer resp.Body.Close()
-
-				body, err := io.ReadAll(resp.Body)
-				if err != nil {
-					logger.Errorf("Failed to read HTTP response body from %s: %v", ip, err)
+				if device.Fingerprint != "" && device.Fingerprint == shared.Message.Fingerprint {
+					logger.Debugf("Skip self discovered via HTTP on %s", ip)
 					return
 				}
-
-				// register 的响应是本机的设备信息（models.RegisterResponse），
-				// 字段是 BroadcastMessage 的子集，直接反序列化即可；LastSeen 另行赋值。
-				var response models.BroadcastMessage
-				if err := json.Unmarshal(body, &response); err != nil {
-					logger.Errorf("Failed to parse HTTP response from %s: %v", ip, err)
-					return
-				}
-				// 响应里通常不带 announce（那是 UDP 公告专用字段），不修正的话
-				// 探测到的设备会被当成「不要求回复」，与 UDP 链路的行为不一致。
-				response.Announce = true
-
-				response.LastSeen = time.Now()
 
 				shared.DevicesMutex.Lock()
-				shared.DiscoveredDevices[ip] = response
+				shared.DiscoveredDevices[ip] = device
 				shared.DevicesMutex.Unlock()
 			}(ip)
 		}
-
 		wg.Wait()
 
 		shared.DevicesMutex.RLock()

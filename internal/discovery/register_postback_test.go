@@ -3,6 +3,7 @@ package discovery
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/models"
@@ -42,11 +43,31 @@ func withLocalMessage(t *testing.T, msg models.BroadcastMessage) {
 	t.Cleanup(func() { shared.Message = old })
 }
 
+// freshDeduper 返回一个空的去重表，避免测试之间互相踩（同一 IP + 指纹只回发一次）。
+func freshDeduper() *postbackDeduper {
+	return &postbackDeduper{last: map[string]time.Time{}}
+}
+
+// withFixedNow 把去重表的时钟固定住，让 TTL 行为可断言。
+func withFixedNow(d *postbackDeduper, now *time.Time) {
+	d.now = func() time.Time { return *now }
+	d.ttl = postbackTTL
+}
+
+// reply 是同包里触发一次回发的统一入口，统一注入新的去重表。
+func reply(t *testing.T, dedup *postbackDeduper, ip string, msg models.BroadcastMessage, poster RegisterPoster) {
+	t.Helper()
+	if dedup == nil {
+		dedup = freshDeduper()
+	}
+	replyToAnnouncementDedup(dedup, ip, msg, poster)
+}
+
 // TestReplyToAnnouncementPostsWhenAnnounceTrue 是验收标准里「announce == true 触发回发」。
 func TestReplyToAnnouncementPostsWhenAnnounceTrue(t *testing.T) {
 	fake := &fakePoster{}
 
-	replyToAnnouncement("192.168.1.10", announcement(true), fake.post)
+	reply(t, nil, "192.168.1.10", announcement(true), fake.post)
 
 	if len(fake.calls) != 1 {
 		t.Fatalf("poster called %d times, want 1", len(fake.calls))
@@ -74,7 +95,7 @@ func TestReplyToAnnouncementPostsWhenAnnounceTrue(t *testing.T) {
 func TestReplyToAnnouncementSkipsWhenAnnounceFalse(t *testing.T) {
 	fake := &fakePoster{}
 
-	replyToAnnouncement("192.168.1.10", announcement(false), fake.post)
+	reply(t, nil, "192.168.1.10", announcement(false), fake.post)
 
 	if len(fake.calls) != 0 {
 		t.Fatalf("poster called %d times, want 0", len(fake.calls))
@@ -89,7 +110,7 @@ func TestReplyToAnnouncementSkipsSelf(t *testing.T) {
 	msg.Fingerprint = "self-fp"
 	fake := &fakePoster{}
 
-	replyToAnnouncement("192.168.1.10", msg, fake.post)
+	reply(t, nil, "192.168.1.10", msg, fake.post)
 
 	if len(fake.calls) != 0 {
 		t.Fatalf("poster called %d times, want 0", len(fake.calls))
@@ -100,7 +121,7 @@ func TestReplyToAnnouncementSkipsSelf(t *testing.T) {
 func TestReplyToAnnouncementSkipsInvalidIP(t *testing.T) {
 	fake := &fakePoster{}
 
-	replyToAnnouncement("not-an-ip", announcement(true), fake.post)
+	reply(t, nil, "not-an-ip", announcement(true), fake.post)
 
 	if len(fake.calls) != 0 {
 		t.Fatalf("poster called %d times, want 0", len(fake.calls))
@@ -112,7 +133,7 @@ func TestReplyToAnnouncementSkipsInvalidIP(t *testing.T) {
 func TestReplyToAnnouncementSwallowsErrors(t *testing.T) {
 	fake := &fakePoster{err: errors.New("connection refused")}
 
-	replyToAnnouncement("192.168.1.10", announcement(true), fake.post)
+	reply(t, nil, "192.168.1.10", announcement(true), fake.post)
 
 	if len(fake.calls) != 1 {
 		t.Fatalf("poster called %d times, want 1", len(fake.calls))
@@ -127,7 +148,7 @@ func TestReplyToAnnouncementNilPosterUsesDefault(t *testing.T) {
 	postbackRegister = fake.post
 	t.Cleanup(func() { postbackRegister = old })
 
-	replyToAnnouncement("192.168.1.10", announcement(true), nil)
+	reply(t, nil, "192.168.1.10", announcement(true), nil)
 
 	if len(fake.calls) != 1 {
 		t.Fatalf("poster called %d times, want 1", len(fake.calls))
