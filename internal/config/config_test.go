@@ -230,3 +230,39 @@ func TestApplyDefaults(t *testing.T) {
 		t.Fatal("unspecified switch should fall back to default")
 	}
 }
+
+// TestPINConfig 覆盖 functions.pin：默认空（不启用），可被配置与 SetPIN 覆盖。
+func TestPINConfig(t *testing.T) {
+	if got := DefaultConfig().Functions.PIN; got != "" {
+		t.Fatalf("default pin = %q, want empty", got)
+	}
+
+	dir := withTempCwd(t)
+	isolateConfigEnv(t, filepath.Join(dir, "cfgdir"))
+	writeFile(t, filepath.Join(dir, configFileName), "functions:\n  pin: \"246810\"\n  skip_existing: false\n")
+	Load()
+
+	if got := ConfigData.Functions.PIN; got != "246810" {
+		t.Fatalf("pin = %q, want 246810", got)
+	}
+	if ConfigData.SkipExistingEnabled() {
+		t.Fatal("skip_existing: false should disable the 204 shortcut")
+	}
+
+	// --pin 的等价入口：SetPIN 覆盖配置值，空白会被裁掉
+	ConfigData.SetPIN("  135790 ")
+	if got := ConfigData.Functions.PIN; got != "135790" {
+		t.Fatalf("pin after SetPIN = %q, want 135790", got)
+	}
+}
+
+// TestSkipExistingDefaultOn 没写 skip_existing 时默认开启。
+func TestSkipExistingDefaultOn(t *testing.T) {
+	if !DefaultConfig().SkipExistingEnabled() {
+		t.Fatal("skip_existing should default to true")
+	}
+	var zero Config
+	if !zero.SkipExistingEnabled() {
+		t.Fatal("nil skip_existing should be treated as enabled")
+	}
+}

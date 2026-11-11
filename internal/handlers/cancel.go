@@ -40,15 +40,21 @@ func HandleCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 本机作为发送端时，cancel 用来中断本地那次上传
 	handlersLock.RLock()
 	cancelFunc, exists := cancelHandlers[sessionID]
 	handlersLock.RUnlock()
 
-	if !exists {
+	if exists {
+		cancelFunc()
+	}
+
+	// 本机作为接收端时，cancel 用来释放会话占位（协议 4.1 的 409 依赖它）。
+	// 两套状态互不相干，可能只有其中一个命中，任一命中都算处理成功。
+	released := store.cancel(sessionID)
+	if !exists && !released {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-
-	cancelFunc()
 	w.WriteHeader(http.StatusOK)
 }

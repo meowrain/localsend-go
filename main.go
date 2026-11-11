@@ -359,6 +359,12 @@ func ReceiveMode() {
 
 func SendMode(filePath string) {
 	err := handlers.SendFile(filePath)
+	reportSendResult(err)
+}
+
+// reportSendResult 统一处理发送结果：204（无需传输）已经是成功路径，
+// SendFile 内部按 ErrNothingToTransfer 提前返回了 nil，这里只需报错分支。
+func reportSendResult(err error) {
 	if err != nil {
 		logger.Errorf("Send failed: %v", err)
 	}
@@ -366,10 +372,7 @@ func SendMode(filePath string) {
 
 // SendTextMode 把文本封装成虚拟 .txt 文件发送，复用 SendFile 的 prepare/upload 流程。
 func SendTextMode(text string) {
-	err := handlers.SendText(text)
-	if err != nil {
-		logger.Errorf("Send failed: %v", err)
-	}
+	reportSendResult(handlers.SendText(text))
 }
 
 // runSendCommand 统一处理 `send` 子命令的参数解析、校验与分发。
@@ -419,12 +422,14 @@ func showHelp() {
 	fmt.Println("  --help              Display this help information")
 	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
 	fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
+	fmt.Println("  --pin=<pin>         Require this PIN on receive (overrides functions.pin)")
 	fmt.Println("")
 	fmt.Println("Config lookup order: --config/LOCALSEND_CONFIG > ./config.yaml >")
 	fmt.Println("  user config dir (e.g. ~/.config/localsend-go/config.yaml) >")
 	fmt.Println("  legacy internal/config/config.yaml > embedded defaults")
 	fmt.Println("Notes:")
 	fmt.Println("  send 的 <file_path>、--text、--clipboard 三者互斥，同时给出会报错退出")
+	fmt.Println("  --pin 是全局参数，必须写在子命令之前：localsend-go --pin 123456 receive")
 }
 
 func ExitMode() {
@@ -461,11 +466,16 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 var (
 	port       int
 	configPath string
+	pin        string
 )
 
 func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
 	flag.StringVar(&configPath, "config", "", "Path to config file")
+	// --pin 是接收端配置，属于全局参数，必须写在子命令之前：
+	// `localsend-go --pin 123456 receive`。写在 send 后面会被 send 自己的
+	// flagset 判成未知参数，这一点在 showHelp() 里提示。
+	flag.StringVar(&pin, "pin", "", "PIN required by the receiver (overrides functions.pin in config)")
 }
 
 func main() {
@@ -495,6 +505,11 @@ func main() {
 	config.SetPath(configPath)
 	// 提前加载配置，方便在启动日志里提示实际使用的配置文件
 	config.Load()
+	// 命令行 --pin 优先于配置文件里的 functions.pin
+	if strings.TrimSpace(pin) != "" {
+		config.ConfigData.SetPIN(pin)
+		logger.Infof("Receiver PIN enabled via --pin")
+	}
 	// 配置就绪后再同步广播消息里的设备名与监听端口
 	shared.SyncFromConfig()
 	shared.SetListenPort(port)

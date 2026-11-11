@@ -5,3 +5,8 @@ device_name: "MeowRain Device"
 functions:
   http_file_server: true
   local_send_server: true
+  # 接收端访问密码，留空表示不需要 PIN（协议 4.1 的 ?pin= 查询参数）
+  # 也可用全局参数 --pin 覆盖，命令行优先于此处配置
+  pin: ""
+  # 本次传输的文件都已存在且 sha256 一致时回 204 跳过传输，默认开启
+  skip_existing: true

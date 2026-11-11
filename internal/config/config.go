@@ -50,6 +50,12 @@ var legacyPath = filepath.Join("internal", "config", configFileName)
 type Functions struct {
 	HttpFileServer  *bool `yaml:"http_file_server"`
 	LocalSendServer *bool `yaml:"local_send_server"`
+	// PIN 是接收端的访问密码（协议 4.1 的 ?pin= 查询参数）。
+	// 空串表示不启用，发送端无需携带 pin 即可 prepare-upload。
+	PIN string `yaml:"pin"`
+	// SkipExisting 控制 204 优化：本次 prepare 的全部文件都已在 uploads/
+	// 且 sha256 一致时，回 204 让发送端跳过传输。默认开启，设为 false 可关闭。
+	SkipExisting *bool `yaml:"skip_existing"`
 }
 
 // Config 是配置文件的映射结构
@@ -94,6 +100,16 @@ func (c Config) HttpFileServerEnabled() bool {
 // LocalSendServerEnabled 返回是否启用 LocalSend 接收服务
 func (c Config) LocalSendServerEnabled() bool {
 	return c.Functions.LocalSendServer == nil || *c.Functions.LocalSendServer
+}
+
+// SkipExistingEnabled 返回是否启用「已存在且校验和一致就回 204」的优化。
+func (c Config) SkipExistingEnabled() bool {
+	return c.Functions.SkipExisting == nil || *c.Functions.SkipExisting
+}
+
+// SetPIN 设置接收端 PIN，供 --pin 命令行参数覆盖配置里的值。
+func (c *Config) SetPIN(pin string) {
+	c.Functions.PIN = strings.TrimSpace(pin)
 }
 
 // random device name
@@ -325,6 +341,10 @@ func applyDefaults(cfg *Config, def Config) {
 	if cfg.Functions.LocalSendServer == nil && def.Functions.LocalSendServer != nil {
 		v := *def.Functions.LocalSendServer
 		cfg.Functions.LocalSendServer = &v
+	}
+	if cfg.Functions.SkipExisting == nil && def.Functions.SkipExisting != nil {
+		v := *def.Functions.SkipExisting
+		cfg.Functions.SkipExisting = &v
 	}
 }
 
