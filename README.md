@@ -12,7 +12,7 @@
 
 ## 版本说明 | Version Notes | バージョン情報
 
-- v1.2.2 - 当前最新版本 | Current Version | 現行バージョン
+- v1.3.0 - 当前最新版本 | Current Version | 現行バージョン
 - [v1.1.0](doc/version1.1.0/) - 历史版本 | Historical Version | 過去のバージョン
 
 ## 快速开始 | Quick Start | クイックスタート

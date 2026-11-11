@@ -2,7 +2,7 @@
 # Contributor: ilius <saeedgnu@riseup.net>
 
 pkgname=localsend-go
-pkgver=1.2.7
+pkgver=1.3.0
 pkgrel=1
 pkgdesc="CLI implementation of LocalSend protocol in Go"
 arch=('x86_64' 'aarch64' 'armv7h' 'riscv64')
