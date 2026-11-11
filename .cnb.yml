@@ -80,6 +80,8 @@
   script: |
     set -e
     VERSION="${CNB_BRANCH#v}"
+    # 暂存二进制不入库，全新 clone 里没有这个目录
+    mkdir -p debian/usr/local/bin
     for arch in amd64 arm64; do
       cp "bin/localsend-go-linux-$arch" debian/usr/local/bin/localsend-cli
       chmod 755 debian/usr/local/bin/localsend-cli debian/DEBIAN/postinst
