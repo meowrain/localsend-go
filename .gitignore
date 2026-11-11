@@ -1,6 +1,9 @@
 bin/
 !debian/usr/local/bin/
 
+# Web 模式的运行期文件目录（用户上传的内容，不入库）
+uploads/
+
 # 构建 / 测试产物
 coverage.out
 *.deb

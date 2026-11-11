@@ -54,17 +54,7 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 		}
 		wg.Wait()
 
-		shared.DevicesMutex.RLock()
-		devices := make([]models.SendModel, 0, len(shared.DiscoveredDevices))
-		for ip, device := range shared.DiscoveredDevices {
-			devices = append(devices, models.SendModel{
-				IP:         ip,
-				DeviceName: device.Alias,
-				Port:       device.Port,
-				Protocol:   device.Protocol,
-			})
-		}
-		shared.DevicesMutex.RUnlock()
+		devices := snapshotDevices()
 
 		select {
 		case updates <- devices:

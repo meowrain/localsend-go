@@ -10,3 +10,5 @@ functions:
   pin: ""
   # 本次传输的文件都已存在且 sha256 一致时回 204 跳过传输，默认开启
   skip_existing: true
+  # Web 页面单次上传请求的大小上限（MiB），0 表示不限制；默认 4096
+  web_upload_limit_mb: 4096

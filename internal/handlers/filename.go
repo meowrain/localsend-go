@@ -32,6 +32,39 @@ func safeJoinUnder(base, name string) (string, error) {
 	return full, nil
 }
 
+// cleanRelDir 把前端/请求传来的相对目录（如 "photos/2024"）规整成可安全拼接到
+// uploads/ 之下的相对路径。空串或 "." 表示根目录（返回 ""）。
+//
+// 与 sanitizeFileName 的区别：这里允许用 "/" 分层的多级目录，但每一段都必须
+// 通过 isSafeBaseName，任何一段是 ".."、绝对路径、Windows 盘符都会被整体拒绝，
+// 因此调用方可以直接 filepath.Join(uploads, cleanRelDir(...)) 而不会逃出 uploads。
+func cleanRelDir(dir string) (string, error) {
+	dir = strings.TrimSpace(strings.ReplaceAll(dir, "\\", "/"))
+	dir = strings.TrimPrefix(dir, "./")
+	if dir == "" || dir == "." {
+		return "", nil
+	}
+	if strings.HasPrefix(dir, "/") || strings.Contains(dir, "\x00") {
+		return "", ErrInvalidFileName
+	}
+	segs := strings.Split(dir, "/")
+	out := make([]string, 0, len(segs))
+	for _, seg := range segs {
+		if seg == "" || seg == "." {
+			// 连续斜杠与 "./" 视为无意义，跳过；".." 不在其列，会被 isSafeBaseName 拒绝
+			continue
+		}
+		if !isSafeBaseName(seg) {
+			return "", ErrInvalidFileName
+		}
+		out = append(out, seg)
+	}
+	if len(out) == 0 {
+		return "", nil
+	}
+	return filepath.Join(out...), nil
+}
+
 // maxFileNameBytes 限制落盘文件名的字节数：
 // 常见文件系统单个文件名上限是 255 字节，留出扩展名与清理的余量后取 200。
 const maxFileNameBytes = 200

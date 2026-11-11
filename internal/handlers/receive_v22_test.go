@@ -28,6 +28,10 @@ func isolation(t *testing.T, fileName string) string {
 	workDir := chdirTemp(t)
 	store.reset()
 	t.Cleanup(store.reset)
+	// 传输历史是包级全局状态，每个用例都从空记录开始
+	webHistory.mu.Lock()
+	webHistory.entries = webHistory.entries[:0]
+	webHistory.mu.Unlock()
 	pinGuard.mu.Lock()
 	pinGuard.m = make(map[string]*pinAttempt)
 	pinGuard.now = time.Now

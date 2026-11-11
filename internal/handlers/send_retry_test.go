@@ -66,7 +66,7 @@ func TestUploadRetryStopsAtLimit(t *testing.T) {
 	err := uploadWithRetry(context.Background(), deviceFor(t, srv), "session-1", "a.txt", "token-a.txt",
 		func() (io.ReadCloser, int64, error) {
 			return io.NopCloser(bytes.NewReader([]byte("payload"))), 7, nil
-		})
+		}, nil)
 	if err == nil {
 		t.Fatal("expected error after exhausting retries")
 	}
@@ -83,7 +83,7 @@ func TestUploadRetrySucceedsOnSecondTry(t *testing.T) {
 	err := uploadWithRetry(context.Background(), deviceFor(t, srv), "session-1", "a.txt", "token-a.txt",
 		func() (io.ReadCloser, int64, error) {
 			return io.NopCloser(bytes.NewReader([]byte("payload"))), 7, nil
-		})
+		}, nil)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}
@@ -100,7 +100,7 @@ func TestUploadRetrySkipsNon422(t *testing.T) {
 		err := uploadWithRetry(context.Background(), deviceFor(t, srv), "session-1", "a.txt", "token-a.txt",
 			func() (io.ReadCloser, int64, error) {
 				return io.NopCloser(bytes.NewReader([]byte("payload"))), 7, nil
-			})
+			}, nil)
 		if err == nil {
 			t.Fatalf("status %d: expected error", status)
 		}
@@ -120,7 +120,7 @@ func TestUploadRetryReopensSource(t *testing.T) {
 		func() (io.ReadCloser, int64, error) {
 			atomic.AddInt32(&opened, 1)
 			return io.NopCloser(bytes.NewReader([]byte("payload"))), 7, nil
-		})
+		}, nil)
 	if err != nil {
 		t.Fatalf("expected success, got %v", err)
 	}

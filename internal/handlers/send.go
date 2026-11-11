@@ -19,7 +19,6 @@ import (
 	"github.com/meowrain/localsend-go/internal/discovery"
 	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/models"
-	"github.com/meowrain/localsend-go/internal/tui"
 	"github.com/meowrain/localsend-go/internal/utils/logger"
 	"github.com/meowrain/localsend-go/internal/utils/sha256"
 	"github.com/schollz/progressbar/v3"
@@ -160,14 +159,14 @@ func retryableUpload(err error) bool {
 // uploadWithRetry 给 uploadContent 加上限次重试。
 // open 用来在每次重试时取一份新的内容源：ReadCloser 已经被上一次读到底，
 // 复用同一个只会第二次发出 0 字节。
-func uploadWithRetry(ctx context.Context, device models.SendModel, sessionId, fileId, token string, open func() (io.ReadCloser, int64, error)) error {
+func uploadWithRetry(ctx context.Context, device models.SendModel, sessionId, fileId, token string, open func() (io.ReadCloser, int64, error), progress progressFunc) error {
 	var lastErr error
 	for attempt := 1; attempt <= uploadRetryMax; attempt++ {
 		src, size, err := open()
 		if err != nil {
 			return err
 		}
-		err = uploadContent(ctx, device, sessionId, fileId, token, size, src)
+		err = uploadContent(ctx, device, sessionId, fileId, token, size, src, progress)
 		if err == nil {
 			return nil
 		}
@@ -180,34 +179,63 @@ func uploadWithRetry(ctx context.Context, device models.SendModel, sessionId, fi
 	return lastErr
 }
 
+// progressFunc 是发送进度的回调：fileID 为当前文件，done/total 为字节数。
+// 为 nil 时使用终端进度条；Web 模式传入自己的实现，避免往 stderr 写 ANSI 控制字符。
+type progressFunc func(fileID string, done, total int64)
+
+// progressSink 把写入字节数换算成累计进度并回调，供 Web 端读取。
+type progressSink struct {
+	fn     progressFunc
+	fileID string
+	total  int64
+	done   int64
+}
+
+func (p *progressSink) Write(b []byte) (int, error) {
+	p.done += int64(len(b))
+	p.fn(p.fileID, p.done, p.total)
+	return len(b), nil
+}
+
 // uploadContent 通过 /upload 接口发送一段内容，size 为总字节数，src 由调用方负责关闭。
 // 目标协议与端口取自对端广播的设备信息（device.Protocol / device.Port）。
-func uploadContent(ctx context.Context, device models.SendModel, sessionId, fileId, token string, size int64, src io.ReadCloser) error {
+func uploadContent(ctx context.Context, device models.SendModel, sessionId, fileId, token string, size int64, src io.ReadCloser, progress progressFunc) error {
 	defer src.Close()
 
-	// 创建进度条
-	bar := progressbar.NewOptions64(
-		size,
-		progressbar.OptionSetDescription(fmt.Sprintf("上传 %s", fileId)),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
-		progressbar.OptionShowCount(),
-		progressbar.OptionClearOnFinish(), // 完成时清除进度条
-		progressbar.OptionSetRenderBlankState(true),
-		progressbar.OptionSetPredictTime(true), // 预测剩余时间
-		progressbar.OptionFullWidth(),          // 使用全宽显示
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "█", // 使用实心方块
-			SaucerHead:    "█",
-			SaucerPadding: "░", // 使用灰色方块作为背景
-			BarStart:      "|",
-			BarEnd:        "|",
-		}),
-		progressbar.OptionOnCompletion(func() {
-			fmt.Fprint(os.Stderr, "\n")
-		}),
-	)
+	// 创建进度条（仅在终端模式下；Web 模式由 progress 回调接管）
+	var bar *progressbar.ProgressBar
+	if progress == nil {
+		bar = progressbar.NewOptions64(
+			size,
+			progressbar.OptionSetDescription(fmt.Sprintf("上传 %s", fileId)),
+			progressbar.OptionSetWidth(15),
+			progressbar.OptionShowBytes(true),
+			progressbar.OptionThrottle(time.Second), // 降低刷新频率，减少闪烁
+			progressbar.OptionShowCount(),
+			progressbar.OptionClearOnFinish(), // 完成时清除进度条
+			progressbar.OptionSetRenderBlankState(true),
+			progressbar.OptionSetPredictTime(true), // 预测剩余时间
+			progressbar.OptionFullWidth(),          // 使用全宽显示
+			progressbar.OptionSetTheme(progressbar.Theme{
+				Saucer:        "█", // 使用实心方块
+				SaucerHead:    "█",
+				SaucerPadding: "░", // 使用灰色方块作为背景
+				BarStart:      "|",
+				BarEnd:        "|",
+			}),
+			progressbar.OptionOnCompletion(func() {
+				fmt.Fprint(os.Stderr, "\n")
+			}),
+		)
+	}
+
+	// Web 模式用回调汇报进度；终端模式直接写进度条
+	var sink io.Writer = io.Discard
+	if progress != nil {
+		sink = &progressSink{fn: progress, fileID: fileId, total: size}
+	} else {
+		sink = bar
+	}
 
 	// 构建文件上传的 URL：协议与端口取自对端广播的设备信息；
 	// 查询参数统一用 url.Values 编码，中文、空格、&、#、% 等字符会被正确转义，
@@ -227,7 +255,7 @@ func uploadContent(ctx context.Context, device models.SendModel, sessionId, file
 	go func() {
 		defer pw.Close()
 		// 在新的 goroutine 中写出文件数据
-		_, err := io.Copy(io.MultiWriter(pw, bar), src)
+		_, err := io.Copy(io.MultiWriter(pw, sink), src)
 		if err != nil {
 			uploadErr <- err
 			return
@@ -282,14 +310,18 @@ func uploadContent(ctx context.Context, device models.SendModel, sessionId, file
 		return describeUploadError(resp)
 	}
 
-	fmt.Println() // 添加换行，让进度条显示更清晰
-	logger.Success("File uploaded successfully")
+	if progress == nil {
+		fmt.Println() // 添加换行，让进度条显示更清晰
+		logger.Success("File uploaded successfully")
+	}
 	return nil
 }
 
 // uploadEntry 描述一个待上传条目：如何匹配接收端返回的 token，以及数据从哪里来。
 type uploadEntry struct {
 	file localFile
+	// fileSize 是条目大小，供 Web 进度统计使用；0 表示未知，上传时以 open 返回的为准。
+	fileSize int64
 	// open 返回该条目的内容、总字节数与错误；返回的 ReadCloser 由上传流程负责关闭。
 	open func() (io.ReadCloser, int64, error)
 }
@@ -299,16 +331,42 @@ type sendSpec struct {
 	prepare func(device models.SendModel) (*models.PrepareReceiveResponse, error)
 	// entries 列出本次实际要上传的条目（顺序即上传顺序）。
 	entries []uploadEntry
+	// progress 非 nil 时用它汇报进度（Web 模式）；nil 表示用终端进度条。
+	progress progressFunc
+	// ctx 非 nil 时作为上传链路的上游取消源（Web 任务用）；nil 表示由本流程自建。
+	ctx context.Context
+}
+
+// DeviceSelector 从设备快照流中选择一个发送目标。
+// 终端 UI、测试和 Web 调用方各自提供实现，handlers 不感知 UI。
+type DeviceSelector func(updates <-chan []models.SendModel) (models.SendModel, error)
+
+// contextOrBackground 返回 spec 的上游 context，nil 时退化为 Background。
+func (s sendSpec) contextOrBackground() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
 }
 
 // prepareAndUpload 复用同一套 prepare/upload 流程：先声明文件，再逐个上传内容。
-func prepareAndUpload(spec sendSpec) error {
-	updates := make(chan []models.SendModel)
-	discovery.ListenAndStartBroadcasts(updates)
-	fmt.Println("Please select a device you want to send file to:")
-	device, err := tui.SelectDeviceInfo(updates)
-	if err != nil {
-		return err
+// target 非 nil 时直接向该设备发送，不走 TUI 选择（Web 模式用）。
+func prepareAndUpload(spec sendSpec, target *models.SendModel, selectDevice DeviceSelector) error {
+	var device models.SendModel
+	if target != nil {
+		device = *target
+	} else {
+		if selectDevice == nil {
+			return fmt.Errorf("device selector is required")
+		}
+		updates := make(chan []models.SendModel)
+		discovery.ListenAndStartBroadcasts(updates)
+		fmt.Println("Please select a device you want to send file to:")
+		selected, err := selectDevice(updates)
+		if err != nil {
+			return err
+		}
+		device = selected
 	}
 	response, err := spec.prepare(device)
 	if err != nil {
@@ -323,9 +381,13 @@ func prepareAndUpload(spec sendSpec) error {
 		return nil
 	}
 
-	// 创建一个用于取消的 context
+	// 创建一个用于取消的 context。
+	// spec.ctx 非 nil 时（Web 任务）它就是上游：任务取消会传导到每一次上传请求；
+	// 同时仍然注册 cancel handler，接收端 /cancel 也能中断（cancelUpstream 负责两者都触发）。
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	stopUpstream := context.AfterFunc(spec.contextOrBackground(), cancel)
+	defer stopUpstream()
 
 	// 使用共享的 HTTP 服务器来处理取消请求
 	logger.Info("Registering cancel handler for session: ", response.SessionID)
@@ -337,7 +399,18 @@ func prepareAndUpload(spec sendSpec) error {
 		if !ok {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("token not found for file: %s", entry.file.name))
 		}
-		if err := uploadWithRetry(ctx, device, response.SessionID, fileID, token, entry.open); err != nil {
+		// 进度回调按「本地条目的稳定 key」上报，而不是接收端返回的 fileID：
+		// 官方 App 会重写 fileId，去回调一个前端不认识的 id 只会让进度原地不动。
+		prog := spec.progress
+		if prog != nil {
+			key := entry.file.relID
+			if key == "" {
+				key = entry.file.name
+			}
+			inner := prog
+			prog = func(_ string, done, total int64) { inner(key, done, total) }
+		}
+		if err := uploadWithRetry(ctx, device, response.SessionID, fileID, token, entry.open, prog); err != nil {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("error uploading file: %w", err))
 		}
 	}
@@ -345,7 +418,7 @@ func prepareAndUpload(spec sendSpec) error {
 }
 
 // SendFile 函数
-func SendFile(path string) error {
+func SendFile(path string, selectDevice DeviceSelector) error {
 	// 先罗列出所有待发送文件，prepare 与 upload 两个阶段共用同一份清单。
 	var entries []uploadEntry
 	err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
@@ -390,11 +463,11 @@ func SendFile(path string) error {
 			return SendFileToOtherDevicePrepare(device, path)
 		},
 		entries: entries,
-	})
+	}, nil, selectDevice)
 }
 
 // SendText 把一段文本封装成虚拟 .txt 文件，走与 SendFile 相同的 prepare/upload 流程。
-func SendText(text string) error {
+func SendText(text string, selectDevice DeviceSelector) error {
 	if strings.TrimSpace(text) == "" {
 		return ErrEmptyText
 	}
@@ -424,7 +497,7 @@ func SendText(text string) error {
 				return io.NopCloser(bytes.NewReader(content)), int64(len(content)), nil
 			},
 		}},
-	})
+	}, nil, selectDevice)
 }
 
 // localFile 是待上传文件在本地的描述。
@@ -477,78 +550,70 @@ func matchUploadTarget(tokens map[string]string, f localFile, localCount int) (s
 	return "", "", false
 }
 
+// NormalSendHandler 是 Web 页面旧版上传入口（POST /send，multipart）。
+//
+// 新版页面已经改用 /api/web/upload（逐文件进度、保留多级目录、冲突策略），
+// 这里保留是为了兼容旧书签/脚本：
+//   - directoryName 与旧版一样只允许「单级目录名」，不再直接 filepath.Join；
+//   - 上传大小受 config.functions.web_upload_limit_mb 限制；
+//   - 写盘走临时文件 + rename，失败不会留下半截文件。
 func NormalSendHandler(w http.ResponseWriter, r *http.Request) {
-	logger.Info("Handling upload request...") // Debug log - request start
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	logger.Info("Handling upload request...")
 
-	// 限制表单数据大小（此处设置为 10 MB，可根据需要调整）
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
+	if limit := config.ConfigData.WebUploadLimitBytes(); limit > 0 {
+		r.Body = http.MaxBytesReader(w, r.Body, limit)
+	}
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, fmt.Sprintf("上传内容超过上限 %d MiB", maxErr.Limit>>20), http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, fmt.Sprintf("解析表单失败: %v", err), http.StatusBadRequest)
 		return
 	}
+	defer func() {
+		if r.MultipartForm != nil {
+			_ = r.MultipartForm.RemoveAll()
+		}
+	}()
 
-	// 获取上传的目录名 (来自前端 hidden input)
-	uploadedDirName := r.FormValue("directoryName")
-	logger.Debugf("directoryName from form: '%s'\n", uploadedDirName) // Debug log - directoryName value
+	// directoryName 只接受单级目录名："../x"、"a/b" 都会被拒绝，
+	// 避免旧接口成为目录穿越入口。
+	finalUploadDir, err := webAbsPath(r.FormValue("directoryName"))
+	if err != nil {
+		http.Error(w, "非法目录名", http.StatusBadRequest)
+		return
+	}
 
-	// 获取所有上传的文件
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
 		http.Error(w, "未上传任何文件", http.StatusBadRequest)
 		return
 	}
 
-	uploadDir := "./uploads"    // 基础上传目录
-	finalUploadDir := uploadDir // 默认最终上传目录
-
-	// 如果前端传递了目录名且不为空，才创建以目录名命名的子目录
-	if uploadedDirName != "" {
-		finalUploadDir = filepath.Join(uploadDir, uploadedDirName)
-	} else {
-		logger.Debug("No directoryName provided, uploading to root uploads dir.") // Debug log - no directoryName
-	}
-	logger.Debugf("Final upload directory: '%s'\n", finalUploadDir)
-
-	// 创建最终的上传目录（如果不存在）
-	if err := os.MkdirAll(finalUploadDir, os.ModePerm); err != nil {
+	if err := os.MkdirAll(finalUploadDir, 0o755); err != nil {
 		http.Error(w, fmt.Sprintf("无法创建上传目录: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// 遍历所有文件进行保存
 	for _, fileHeader := range files {
-		// 打开上传的文件
-		file, err := fileHeader.Open()
+		name, err := sanitizeFileName(fileHeader.Filename)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("无法打开文件: %v", err), http.StatusInternalServerError)
+			http.Error(w, "非法文件名", http.StatusBadRequest)
 			return
 		}
-		defer file.Close()
-
-		// 拼接目标路径 (使用 finalUploadDir 作为根目录)
-		destPath := filepath.Join(finalUploadDir, fileHeader.Filename)
-		logger.Infof("Saving file '%s' to destPath: '%s'\n", fileHeader.Filename, destPath) // Debug log - file dest path
-
-		// 创建目标目录（如果不存在）
-		if err := os.MkdirAll(filepath.Dir(destPath), os.ModePerm); err != nil {
-			http.Error(w, fmt.Sprintf("无法创建目录: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// 创建目标文件
-		dst, err := os.Create(destPath)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("无法创建文件: %v", err), http.StatusInternalServerError)
-			return
-		}
-		defer dst.Close()
-
-		// 将上传的文件内容写入目标文件
-		if _, err := io.Copy(dst, file); err != nil {
+		if _, err := saveMultipartFile(fileHeader, filepath.Join(finalUploadDir, name)); err != nil {
+			logger.Errorf("Save uploaded file %s failed: %v", name, err)
 			http.Error(w, fmt.Sprintf("保存文件失败: %v", err), http.StatusInternalServerError)
 			return
 		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
-	fmt.Fprintf(w, "文件上传成功，共计 %d 个文件，上传到目录: %s\n", len(files), finalUploadDir)
+	fmt.Fprintf(w, "文件上传成功，共计 %d 个文件\n", len(files))
 }
