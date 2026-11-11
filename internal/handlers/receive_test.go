@@ -274,8 +274,10 @@ func TestSafeJoinUnder(t *testing.T) {
 // TestConcurrentPrepareAndUpload 用 -race 跑并发的 Prepare / Upload，验证会话表的共享状态已加锁。
 //
 // 协议 v2 规定同一时间只允许一个活跃会话，因此这里让各 goroutine 自己完整跑完
-// 「prepare -> upload」，每次 prepare 失败都要再重试：并发之间互相 409 是预期行为，
-// 真正要验证的是「不数据竞争、且最终每个文件都完整落盘」。
+// 「prepare -> upload」，两类失败都要再重试：并发之间互相 409 是预期行为；
+// upload 侧也可能 403/409——prepare 与 upload 之间会话被别的发送端抢走、
+// 或同源重试把会话 id 换掉。真实发送端遇到这两种情况就是重新 prepare，
+// 这里照做，真正要验证的是「不数据竞争、且最终每个文件都完整落盘」。
 func TestConcurrentPrepareAndUpload(t *testing.T) {
 	workDir := chdirTemp(t)
 
@@ -315,11 +317,30 @@ func TestConcurrentPrepareAndUpload(t *testing.T) {
 				t.Errorf("no session acquired for %s", fileName)
 				return
 			}
-			rec2 := httptest.NewRecorder()
-			ReceiveHandler(rec2, uploadRequest(resp.SessionID, fileName, resp.Files[fileName], "data"))
-			if rec2.Code != http.StatusOK {
-				t.Errorf("ReceiveHandler status = %d, body = %s", rec2.Code, rec2.Body.String())
+			for attempt := 0; attempt < 200; attempt++ {
+				rec2 := httptest.NewRecorder()
+				ReceiveHandler(rec2, uploadRequest(resp.SessionID, fileName, resp.Files[fileName], "data"))
+				if rec2.Code == http.StatusOK {
+					return
+				}
+				if rec2.Code != http.StatusForbidden && rec2.Code != http.StatusConflict {
+					t.Errorf("ReceiveHandler status = %d, body = %s", rec2.Code, rec2.Body.String())
+					return
+				}
+				// 会话已被别人抢占：重新 prepare 拿一份新的会话再传
+				body, _ := json.Marshal(req)
+				rec3 := httptest.NewRecorder()
+				PrepareReceive(rec3, httptest.NewRequest(http.MethodPost, "/api/localsend/v2/prepare-upload", bytes.NewReader(body)))
+				if rec3.Code != http.StatusOK {
+					continue
+				}
+				resp = models.PrepareReceiveResponse{}
+				if err := json.Unmarshal(rec3.Body.Bytes(), &resp); err != nil {
+					t.Errorf("decode response: %v", err)
+					return
+				}
 			}
+			t.Errorf("upload never succeeded for %s", fileName)
 		}(i)
 	}
 	wg.Wait()

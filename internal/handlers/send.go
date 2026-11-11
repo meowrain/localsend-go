@@ -98,9 +98,11 @@ func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRe
 
 	// 发送POST请求：协议与端口取自对端广播，不再写死 https/53317
 	prepareURL := buildSendURL(device, "/api/localsend/v2/prepare-upload")
-	// PIN 走查询参数（协议 4.1）。用 url.Values 编码，PIN 里出现 & # % 空格之类
-	// 的字符时才不会把查询串拼坏。
-	if pin := strings.TrimSpace(config.ConfigData.Functions.PIN); pin != "" {
+	// PIN 走查询参数（协议 4.1）。这里取的是「对端的 PIN」，不是本机接收端的 PIN：
+	// 两者含义完全不同，混用会让 `--pin` 互相污染（本机要求 123456，就一定会拿
+	// 123456 去开对端）。
+	// 用 url.Values 编码，PIN 里出现 & # % 空格之类的字符时才不会把查询串拼坏。
+	if pin := config.ConfigData.SendPIN(); pin != "" {
 		query := url.Values{}
 		query.Set("pin", pin)
 		prepareURL += "?" + query.Encode()
@@ -140,6 +142,42 @@ func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRe
 	}
 
 	return &prepareReceiveResponse, nil
+}
+
+// uploadRetryMax 是单个文件的上传尝试次数上限（含首次）。
+//
+// 只有 422（校验和不匹配）会重试：官方发送端对「内容传完但校验失败」最多重试
+// 3 次，之后放弃。其余状态码（403 token 失效、409 会话被占、5xx 落盘失败）
+// 重试也不会有不同结果，直接失败让用户看到真实原因。
+const uploadRetryMax = 3
+
+// retryableUpload 判断这个错误值不值得再传一次，目前只认 422。
+func retryableUpload(err error) bool {
+	var sce *statusCodeError
+	return errors.As(err, &sce) && sce.Status == statusChecksumMismatch
+}
+
+// uploadWithRetry 给 uploadContent 加上限次重试。
+// open 用来在每次重试时取一份新的内容源：ReadCloser 已经被上一次读到底，
+// 复用同一个只会第二次发出 0 字节。
+func uploadWithRetry(ctx context.Context, device models.SendModel, sessionId, fileId, token string, open func() (io.ReadCloser, int64, error)) error {
+	var lastErr error
+	for attempt := 1; attempt <= uploadRetryMax; attempt++ {
+		src, size, err := open()
+		if err != nil {
+			return err
+		}
+		err = uploadContent(ctx, device, sessionId, fileId, token, size, src)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retryableUpload(err) || ctx.Err() != nil || attempt == uploadRetryMax {
+			break
+		}
+		logger.Warnf("Upload of %s rejected with 422, retrying (%d/%d)", fileId, attempt, uploadRetryMax)
+	}
+	return lastErr
 }
 
 // uploadContent 通过 /upload 接口发送一段内容，size 为总字节数，src 由调用方负责关闭。
@@ -299,11 +337,7 @@ func prepareAndUpload(spec sendSpec) error {
 		if !ok {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("token not found for file: %s", entry.file.name))
 		}
-		src, size, err := entry.open()
-		if err != nil {
-			return err
-		}
-		if err := uploadContent(ctx, device, response.SessionID, fileID, token, size, src); err != nil {
+		if err := uploadWithRetry(ctx, device, response.SessionID, fileID, token, entry.open); err != nil {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("error uploading file: %w", err))
 		}
 	}

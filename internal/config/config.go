@@ -37,6 +37,10 @@ const EnvConfigPath = "LOCALSEND_CONFIG"
 // EnvConfigDir 指定配置目录的环境变量
 const EnvConfigDir = "LOCALSEND_CONFIG_DIR"
 
+// EnvSendPIN 提供「对端接收端 PIN」的环境变量，等价于 send --pin。
+// 单独放环境变量是为了不让 PIN 留在 shell history 里。
+const EnvSendPIN = "LOCALSEND_SEND_PIN"
+
 // 配置文件与目录名
 const (
 	configDirName  = "localsend-go"
@@ -50,9 +54,13 @@ var legacyPath = filepath.Join("internal", "config", configFileName)
 type Functions struct {
 	HttpFileServer  *bool `yaml:"http_file_server"`
 	LocalSendServer *bool `yaml:"local_send_server"`
-	// PIN 是接收端的访问密码（协议 4.1 的 ?pin= 查询参数）。
+	// PIN 是接收端的访问密码（协议 4.1 的 ?pin= 查询参数），只作用于本机的接收端。
 	// 空串表示不启用，发送端无需携带 pin 即可 prepare-upload。
+	// 发送时提供给「对端」的 PIN 是另一件事，见 SendPIN。
 	PIN string `yaml:"pin"`
+	// SendPIN 是本机作为发送端时，填给对端接收端的 PIN。
+	// 只来自 `send --pin <对端 PIN>`：不写进配置文件，也不与接收端的 PIN 互相污染。
+	SendPIN string `yaml:"-"`
 	// SkipExisting 控制 204 优化：本次 prepare 的全部文件都已在 uploads/
 	// 且 sha256 一致时，回 204 让发送端跳过传输。默认开启，设为 false 可关闭。
 	SkipExisting *bool `yaml:"skip_existing"`
@@ -107,9 +115,24 @@ func (c Config) SkipExistingEnabled() bool {
 	return c.Functions.SkipExisting == nil || *c.Functions.SkipExisting
 }
 
-// SetPIN 设置接收端 PIN，供 --pin 命令行参数覆盖配置里的值。
+// SetPIN 设置接收端 PIN，供全局参数 --pin 覆盖配置里的值。
 func (c *Config) SetPIN(pin string) {
 	c.Functions.PIN = strings.TrimSpace(pin)
+}
+
+// ReceiverPIN 返回本机接收端要求的 PIN，空串表示不校验。
+func (c Config) ReceiverPIN() string {
+	return strings.TrimSpace(c.Functions.PIN)
+}
+
+// SetSendPIN 设置发送时提供给对端的 PIN，供 `send --pin` 覆盖。
+func (c *Config) SetSendPIN(pin string) {
+	c.Functions.SendPIN = strings.TrimSpace(pin)
+}
+
+// SendPIN 返回发送时提供给对端接收端的 PIN，空串表示不带 pin 参数。
+func (c Config) SendPIN() string {
+	return strings.TrimSpace(c.Functions.SendPIN)
 }
 
 // random device name

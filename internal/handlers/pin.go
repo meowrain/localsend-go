@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"crypto/subtle"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,12 +115,14 @@ func checkPINWithLimit(want, ip, given string) (ok bool, status int, msg string)
 	if pinGuard.tooMany(ip) {
 		return false, statusTooManyRequests, "too many requests"
 	}
+	// 完全没带 pin（或只有空白）说明对端还没开始猜：官方只对「pin 错误」计数，
+	// 这里也放过它，否则老版本发送端一次 prepare 就会消耗掉本机用户的尝试次数。
+	if strings.TrimSpace(given) == "" {
+		return false, statusPINRequired, "PIN required"
+	}
 	// 长度不同直接失败；相同时用常量时间比较，避免逐字节比较泄漏 PIN 内容。
 	if len(given) != len(want) || subtle.ConstantTimeCompare([]byte(given), []byte(want)) != 1 {
 		pinGuard.fail(ip)
-		if given == "" {
-			return false, statusPINRequired, "PIN required"
-		}
 		return false, statusInvalidPIN, "invalid PIN"
 	}
 	pinGuard.reset(ip)

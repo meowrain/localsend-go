@@ -10,12 +10,15 @@ import (
 	"github.com/meowrain/localsend-go/internal/utils/clipboard"
 )
 
-// sendOptions 描述 `send` 子命令的三种发送来源，彼此互斥。
+// sendOptions 描述 `send` 子命令的参数：三种发送来源彼此互斥，另有一个可选的对端 PIN。
 type sendOptions struct {
 	FilePath  string // 位置参数：send <file_path>
 	Text      string
 	TextSet   bool // --text 是否出现（允许显式传入空串，由校验统一报错）
 	Clipboard bool
+	// PeerPIN 是「对端接收端」要求的 PIN（`send --pin 123456`）。
+	// 与全局的 --pin（本机接收端要求的 PIN）是两回事，互不影响。
+	PeerPIN string
 }
 
 // SourceCount 返回被选中的发送来源个数。
@@ -80,6 +83,7 @@ func parseSendOptions(args []string, usage io.Writer) (sendOptions, error) {
 	fs.SetOutput(usage)
 	fs.StringVar(&opts.Text, "text", "", "要发送的文本内容")
 	fs.BoolVar(&opts.Clipboard, "clipboard", false, "发送本机剪贴板内容")
+	fs.StringVar(&opts.PeerPIN, "pin", "", "对端接收端要求的 PIN（与全局 --pin 无关）")
 
 	// 先统计每个 flag 出现的次数：flag 包对重复传入是「后者覆盖前者」，
 	// 用户写 `--text a --text b` 时会静默只发 b，这里直接拒绝。
@@ -92,7 +96,7 @@ func parseSendOptions(args []string, usage io.Writer) (sendOptions, error) {
 		if idx := strings.IndexByte(name, '='); idx >= 0 {
 			name = name[:idx]
 		}
-		if name == "text" || name == "clipboard" {
+		if name == "text" || name == "clipboard" || name == "pin" {
 			counts[name]++
 		}
 	}
@@ -111,6 +115,8 @@ func parseSendOptions(args []string, usage io.Writer) (sendOptions, error) {
 			opts.TextSet = true
 		}
 	})
+	// 空白 PIN 等同于没给：避免把 "  " 当 PIN 发给对端
+	opts.PeerPIN = strings.TrimSpace(opts.PeerPIN)
 
 	switch fs.NArg() {
 	case 0:

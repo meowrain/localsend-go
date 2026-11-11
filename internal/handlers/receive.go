@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -54,9 +55,18 @@ type receiveFile struct {
 	token  string
 	sha256 string // prepare 阶段声明的校验和，空表示对端没提供（协议 nullable）
 	size   int64
-	// done 表示该文件已经「处理完毕」：上传成功、校验和不匹配、或确认无需传输。
-	// 失败的文件也算结束——否则一个 422 会让会话永久占用，后续发送端全部 409。
+	// done 表示该文件已经「处理完毕」：上传成功、校验和不匹配、传输中断，或确认无需传输。
+	// 失败的文件也算结束——否则一次 422 或一次断连会让会话永久占用，后续发送端全部 409。
+	// done 一旦置位就不再翻转：受理上传前会检查它，避免 token 重放覆盖已落盘的文件。
 	done bool
+	// failed 表示 done 是「失败」造成的终态（中断 / 422），内容并没有落盘。
+	// 这种文件虽然也不再 Pending，但重传是合法的：对端本来就是来补传的。
+	failed bool
+}
+
+// terminal 表示该文件已经进入终态：不再占用会话。
+func (f *receiveFile) terminal() bool {
+	return f.done
 }
 
 // receiveSession 是一次 prepare-upload 建立的传输会话。
@@ -66,10 +76,14 @@ type receiveSession struct {
 	peerIP   string                  // prepare-upload 请求的来源 IP
 	created  time.Time
 	lastUsed time.Time // 最近一次活动（上传成功 / cancel）的时间，用于淘汰时优先保留活跃会话
-	// ended 是会话的显式结束标记：所有文件处理完，或收到 /cancel。
+	// ended 是会话的显式结束标记：所有文件处理完、收到 /cancel、或某次传输失败。
 	// 会话结束后不再占用「唯一活跃会话」的位置（4.1 的 409），
 	// 也不会再参与 204 判断（文件已存在不代表会话仍未使用）。
 	ended bool
+	// failed 表示会话里出现过失败/中断的文件。
+	// 这种会话已经是「残局」：继续占用唯一会话的位置只会挡住别人，
+	// 因此让位给后续 prepare（包括同一个发送端重发的 prepare）。
+	failed bool
 }
 
 // receiveStore 保存 prepare 阶段下发的会话信息。
@@ -77,13 +91,17 @@ type receiveSession struct {
 type receiveStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*receiveSession
+	// pending 记录「正在处理」的上传及其落盘结果，key 见 fileKey。
+	// 它只在单个请求的生命周期内存在，和会话表分开：会话可能中途被清理，
+	// 但这次请求仍然需要知道自己该落成功还是失败终态。
+	pending map[string]bool
 }
 
 var (
 	sessionIDCounter atomic.Uint64
 	// 仅保留最近若干个会话，避免长期运行后无限增长
 	maxSessions = 64
-	store       = &receiveStore{sessions: make(map[string]*receiveSession)}
+	store       = &receiveStore{sessions: make(map[string]*receiveSession), pending: make(map[string]bool)}
 )
 
 func newSessionID() string {
@@ -139,7 +157,7 @@ func (s *receiveSession) idleSince() time.Time {
 // finished 表示该会话不再占用传输通道：收到过 cancel，或所有文件都已处理完毕。
 // 没有任何文件、又还没被处理过的会话不算结束——它同样占着唯一会话的位置。
 func (s *receiveSession) finished() bool {
-	if s.ended {
+	if s.ended || s.failed {
 		return true
 	}
 	if len(s.files) == 0 {
@@ -183,6 +201,8 @@ func (s *receiveStore) touch(id string) {
 
 // finishFile 标记某个文件已处理完毕；最后一个文件完成时会话随之结束，
 // 后续 prepare 就不再被判成「另一个会话正在传输」（409）。
+//
+// failFile 的语义与它相同：成功、失败都算终态，会话只看「还有没有 Pending 的文件」。
 func (s *receiveStore) finishFile(sessionID, fileID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -192,11 +212,105 @@ func (s *receiveStore) finishFile(sessionID, fileID string) {
 	}
 	if f, ok := sess.files[fileID]; ok {
 		f.done = true
+		f.failed = false
 	}
 	sess.lastUsed = time.Now()
 	if sess.finished() {
 		sess.ended = true
 	}
+	// 传完的会话先留在表里：它已经让位给下一个发送端（不再 409），
+	// 但还要能被「token 重放」认出来并拒掉，否则旧 token 可以反复覆盖文件。
+	// 表有 maxSessions 上限兜底，不会无限增长。
+}
+
+// failFile 标记某个文件已进入失败终态（传输中断、校验和不匹配）。
+//
+// 失败路径必须落终态：官方接收端的 UploadGuard 在 Drop 时以 Failed 调 finalize_file，
+// 效果等价于「没有文件停在 Pending」。这里漏掉一步就会出现——发送端断连后
+// 没有任何人再碰这个会话，它永远 finished() == false，其他设备的 prepare 一直 409，
+// 只能重启进程才能恢复。
+func (s *receiveStore) failFile(sessionID, fileID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		return
+	}
+	// 失败的会话已经让出传输通道：残局不该继续占着唯一会话的位置，
+	// 同一个发送端重发 prepare 时也应当能拿到新会话续传。
+	sess.ended = true
+	sess.failed = true
+	sess.lastUsed = time.Now()
+	if f, ok := sess.files[fileID]; ok {
+		f.done = true
+		f.failed = true
+	}
+}
+
+var (
+	// errNotPending 表示文件已经离开 Pending（内容已落盘），不能再接受上传。
+	errNotPending = errors.New("file is no longer pending")
+	// errNoSession / errNoFile 表示会话或文件在 prepare 之后被淘汰了。
+	errNoSession = errors.New("unknown session")
+	errNoFile    = errors.New("unknown fileId")
+)
+
+// fileKey 在一次 upload 里必须同时认 sessionId 和 fileId。
+// 只认 fileId 会在会话被替换后把记录记到错误的会话上（别的设备可能也在传同名文件）。
+func fileKey(sessionID, fileID string) string {
+	return sessionID + "\x00" + fileID
+}
+
+// settle 记录一次上传的结果，供结束时核对：completed 表示内容已经落盘。
+func (s *receiveStore) settle(key string, completed bool) {
+	s.mu.Lock()
+	s.pending[key] = completed
+	s.mu.Unlock()
+}
+
+// finishUpload 在请求结束时收尾：内容落盘了才落成功终态，其他情况一律失败终态。
+// 一次上传无论怎么退出（成功 / 422 / 500 / 断连）都必然落到这里，
+// 因此文件不会停在 Pending 上。
+func (s *receiveStore) finishUpload(key, sessionID, fileID string) {
+	s.mu.Lock()
+	completed, ok := s.pending[key]
+	delete(s.pending, key)
+	s.mu.Unlock()
+	if !ok {
+		return
+	}
+	if completed {
+		s.finishFile(sessionID, fileID)
+		return
+	}
+	s.failFile(sessionID, fileID)
+}
+
+// beginUpload 在真正开始接收内容前占位：把文件原子地置回 Pending（failed -> Pending）。
+//
+// validateUpload 读的是快照，检查完到落盘之间还有一个窗口：对端的重试请求可能
+// 同时到达，两边都看到「失败终态、可以重传」，然后互相覆盖同一个目标文件。
+// 这里在锁内再判一次，只有一个请求能拿到这次上传。
+//
+// 收尾由 finishUpload 负责：completed 为 true 落成功终态，否则落失败终态
+// （含 500 / 400 / 断连），保证文件不会卡在「传输中」。
+func (s *receiveStore) beginUpload(sessionID, fileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("%w: %q", errNoSession, sessionID)
+	}
+	f, ok := sess.files[fileID]
+	if !ok {
+		return fmt.Errorf("%w: %q", errNoFile, fileID)
+	}
+	if f.done && !f.failed {
+		return fmt.Errorf("%w: %q", errNotPending, fileID)
+	}
+	f.failed = false
+	sess.lastUsed = time.Now()
+	return nil
 }
 
 // cancel 释放会话占位：把所有未完成的文件标成结束，会话随即变成 finished，
@@ -248,6 +362,7 @@ func (s *receiveStore) lookup(id string) (receiveSnapshot, bool) {
 func (s *receiveStore) reset() {
 	s.mu.Lock()
 	s.sessions = make(map[string]*receiveSession)
+	s.pending = make(map[string]bool)
 	s.mu.Unlock()
 }
 
@@ -448,6 +563,13 @@ func validateUpload(r *http.Request) (receiveSnapshot, string, receiveFile, erro
 		return receiveSnapshot{}, "", receiveFile{}, fmt.Errorf("token mismatch for fileId %q", fileID)
 	}
 
+	// 已经传完的文件不再受理上传：官方要求 file.status == Pending 才接受，
+	// 否则拿着旧 token 重放就能把 uploads/ 下的文件覆盖掉。
+	// 失败终态（中断 / 422）的文件例外——它没有落盘，重传只会被当成一次新上传。
+	if file.terminal() && !file.failed {
+		return receiveSnapshot{}, "", receiveFile{}, errNotPending
+	}
+
 	// 只拒绝明显的跨主机请求；同网段 NAT / 容器环境下的地址变化放行，避免破坏兼容性
 	if sess.peerIP != "" {
 		peer := net.ParseIP(sess.peerIP)
@@ -477,13 +599,49 @@ func sameHost(a, b net.IP) bool {
 }
 
 func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
-	sess, fileID, file, err := validateUpload(r)
+	snapshot, fileID, file, err := validateUpload(r)
 	if err != nil {
-		// 协议里 token 不匹配固定返回 403，且此时不会创建任何文件
 		logger.Errorf("Rejected upload: %v", err)
+		// 文件已经传完（token 重放）：409 表示「现在不该传」，
+		// 发送端据此判断不该重试，uploads/ 下的文件保持原样。
+		// 其余情况（token / 来源 IP 不对）按协议固定回 403，且不创建任何文件。
+		if errors.Is(err, errNotPending) {
+			http.Error(w, "Blocked by another session", statusBlockedBySession)
+			return
+		}
 		http.Error(w, "Invalid token or IP address", statusRejected)
 		return
 	}
+
+	// 抢占这次上传：原子地把文件置回 Pending（failed -> Pending）。
+	// 校验与落盘之间有窗口，并发重试会同时走到这里；谁先拿到锁谁传，
+	// 另一个直接 409，不会出现两个 rename 互相覆盖同一个目标文件。
+	// 这里也是官方「file.status == Pending 才受理上传」的落点：
+	// 已经传完的文件（token 重放）会被判成 errNotPending，随后回 409。
+	sessID := snapshot.id
+	if err := store.beginUpload(sessID, fileID); err != nil {
+		logger.Errorf("Rejected upload: %v", err)
+		// 文件已经传完（token 重放）：409 表示「现在不该传」，
+		// 发送端据此判断不该重试，uploads/ 下的文件保持原样。
+		if errors.Is(err, errNotPending) {
+			http.Error(w, "Blocked by another session", statusBlockedBySession)
+			return
+		}
+		// 会话在 prepare 之后被挤掉了（别的设备抢到通道 / 同源重试换了新会话）：
+		// 这次数据无处可写，403 让对端重新走一次 prepare。
+		http.Error(w, "Invalid token or IP address", statusRejected)
+		return
+	}
+
+	// 任何未走到落盘的退出（400/422/500/断连）都落失败终态，会话随之让位；
+	// 成功路径在 rename 成功后把 completed 置位。
+	key := fileKey(sessID, fileID)
+	store.settle(key, false)
+	completed := false
+	defer func() {
+		store.settle(key, completed)
+		store.finishUpload(key, sessID, fileID)
+	}()
 
 	if err := os.MkdirAll(uploadBaseDir, 0o755); err != nil {
 		http.Error(w, "Failed to create directory", http.StatusInternalServerError)
@@ -539,7 +697,8 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	written, copyErr := copyWithProgress(r.Body, tmp, hasher, bar)
 
 	if copyErr != nil {
-		// 请求被取消（发送端 /cancel 或直接断开）或读写出错：删临时文件，不落盘任何内容
+		// 请求被取消（发送端 /cancel 或直接断开）或读写出错：删临时文件，不落盘任何内容。
+		// 文件由 defer 标成失败终态——否则这个会话永远「未结束」，别的设备 prepare 永久 409。
 		logger.Errorf("Transfer aborted for %s: %v", file.name, copyErr)
 		// 连接已断时写响应没有意义，但仍显式给出状态码，便于本地调试
 		if r.Context().Err() != nil {
@@ -554,14 +713,15 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 		if subtle.ConstantTimeCompare([]byte(got), []byte(file.sha256)) != 1 {
 			// 422：内容已收完但不匹配。临时文件会被 defer 删掉，
 			// uploads/ 下不会出现半截或错误内容，同名旧文件也保持原样。
+			// 同样落失败终态（defer 里做）：内容收完了但不可用，会话不该继续占着通道。
 			logger.Errorf("Checksum mismatch for %s: got %s, want %s", file.name, got, file.sha256)
 			http.Error(w, "Checksum mismatch (sha256)", statusChecksumMismatch)
 			return
 		}
 	}
 
-	// 同一文件被重复上传（对端重试）时，前一次已经把该文件标成完成，
-	// 这里不能因为会话已结束就丢弃数据：文件已完整收完，直接落盘。
+	// 内容已完整收完且校验通过，直接落盘；落盘成功才把 completed 置位，
+	// 由 defer 里的 finishUpload 落成功终态。
 	if err := tmp.Sync(); err != nil {
 		logger.Warnf("Sync temp file %s failed: %v", tmpPath, err)
 	}
@@ -579,9 +739,9 @@ func ReceiveHandler(w http.ResponseWriter, r *http.Request) {
 	committed = true
 
 	logger.Success("File saved to:", filePath)
-	logger.Debugf("Upload finished: session=%s fileId=%s bytes=%d", sess.id, fileID, written)
+	logger.Debugf("Upload finished: session=%s fileId=%s bytes=%d", sessID, fileID, written)
 	// 标记该文件处理完毕；整张会话都完成后它会自动让位给下一个发送端（不再 409）
-	store.finishFile(sess.id, fileID)
+	completed = true
 	w.WriteHeader(http.StatusOK)
 }
 

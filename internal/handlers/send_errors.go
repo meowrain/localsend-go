@@ -15,14 +15,13 @@ const maxErrorBodyBytes = 4 << 10
 // 接收端产生这些状态码的地方（prepare-upload / upload）统一用这里的常量，
 // 避免发送端与接收端各写一份字面量、改一处漏一处。
 const (
-	statusFinished           = http.StatusNoContent           // 204：无需传输
-	statusPINRequired        = http.StatusUnauthorized        // 401：需要 PIN
-	statusInvalidPIN         = http.StatusUnauthorized        // 401：PIN 错误
-	statusRejected           = http.StatusForbidden           // 403：被接收端拒绝
-	statusBlockedBySession   = http.StatusConflict            // 409：已有活跃会话
-	statusChecksumMismatch   = http.StatusUnprocessableEntity // 422：sha256 不匹配
-	statusTooManyRequests    = http.StatusTooManyRequests     // 429：PIN 尝试过多
-	statusReceiverErrUnknown = http.StatusInternalServerError
+	statusFinished         = http.StatusNoContent           // 204：无需传输
+	statusPINRequired      = http.StatusUnauthorized        // 401：需要 PIN
+	statusInvalidPIN       = http.StatusUnauthorized        // 401：PIN 错误
+	statusRejected         = http.StatusForbidden           // 403：被接收端拒绝
+	statusBlockedBySession = http.StatusConflict            // 409：已有活跃会话
+	statusChecksumMismatch = http.StatusUnprocessableEntity // 422：sha256 不匹配
+	statusTooManyRequests  = http.StatusTooManyRequests     // 429：PIN 尝试过多
 )
 
 // statusCodeError 表示对端返回了非预期的 HTTP 状态码。
@@ -157,8 +156,7 @@ func prepareErrorHint(err error) string {
 	case http.StatusNoContent:
 		return "对方判断这些文件已存在且内容一致，本次传输已完成"
 	case http.StatusUnauthorized:
-		// 本机的 --pin 同时用于接收端与发送端，所以这里提示全局参数写法
-		return "对方开启了 PIN 校验：请用全局参数 --pin <对方显示的 PIN> 重新发送"
+		return "对方开启了 PIN 校验：请用 send --pin <对方显示的 PIN> 重新发送（只看对端，与本机 --pin 无关）"
 	case http.StatusForbidden:
 		return "对方拒绝了本次传输（可能正在等待用户确认，或已手动拒绝）"
 	case http.StatusConflict:

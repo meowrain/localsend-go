@@ -121,7 +121,7 @@ func sha256Hex(content []byte) string {
 }
 
 // TestPreparePIN 覆盖 PIN 的表驱动场景：错误 PIN → 401、连续失败超限 → 429、
-// 正确 PIN 通过、成功后计数清零，以及不配 PIN 时 pin 参数被忽略。
+// 正确 PIN 通过、成功后计数清零。
 func TestPreparePIN(t *testing.T) {
 	isolation(t, "")
 	srv := startReceiverV22(t)
@@ -136,7 +136,9 @@ func TestPreparePIN(t *testing.T) {
 		query string
 		want  int
 	}{
+		// 「没给 pin」不算猜错：官方只对「pin 错误」计数，这里也不消耗尝试次数。
 		{"missing pin", "", http.StatusUnauthorized},
+		{"blank pin", "pin=%20%20", http.StatusUnauthorized},
 		{"wrong pin", "pin=000000", http.StatusUnauthorized},
 		{"wrong length", "pin=1234", http.StatusUnauthorized},
 	}
@@ -148,7 +150,11 @@ func TestPreparePIN(t *testing.T) {
 		})
 	}
 
-	// 上面已经失败 3 次，第 4 次即使 PIN 正确也应该被拦住
+	// 上面只有两次真正「pin 错误」，第 3 次错误才触发 429
+	if code, _ := postPrepare(t, srv.URL, "pin=999999", req); code != http.StatusUnauthorized {
+		t.Fatalf("third wrong pin status = %d, want 401", code)
+	}
+	// 累计 3 次 pin 错误后，即使 PIN 正确也应该被拦住
 	if code, _ := postPrepare(t, srv.URL, "pin=123456", req); code != http.StatusTooManyRequests {
 		t.Fatalf("after %d failures status = %d, want 429", pinMaxFailures, code)
 	}
@@ -170,6 +176,27 @@ func TestPreparePIN(t *testing.T) {
 	// 成功一次即清零：窗口内再错 pinMaxFailures-1 次仍然只是 401，不会直接 429
 	if code, _ := postPrepare(t, srv.URL, "pin=bad", req); code != http.StatusUnauthorized {
 		t.Fatalf("first failure after success status = %d, want 401", code)
+	}
+}
+
+// TestPINMissingNotCounted 「没提供 pin」不该计入失败次数：官方只对「pin 错误」计数。
+// 老版本发送端不带 pin 时反复 prepare，不该把本机用户自己锁在门外。
+func TestPINMissingNotCounted(t *testing.T) {
+	isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "123456")
+	setClock(t, time.Now())
+
+	req := prepareRequest(map[string]models.FileInfo{"a.txt": {ID: "a.txt", FileName: "a.txt", Size: 1}})
+	for i := 0; i < pinMaxFailures*3; i++ {
+		if code, _ := postPrepare(t, srv.URL, "", req); code != http.StatusUnauthorized {
+			t.Fatalf("missing pin #%d status = %d, want 401", i, code)
+		}
+	}
+	// 一次都没猜错，正确 PIN 仍然直接通过
+	if code, body := postPrepare(t, srv.URL, "pin=123456", req); code != http.StatusOK {
+		t.Fatalf("correct pin after %d missing attempts status = %d, want 200 (body %q)",
+			pinMaxFailures*3, code, body)
 	}
 }
 
@@ -552,5 +579,280 @@ func TestInfoHasNoAnnounce(t *testing.T) {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("/info response missing %q: %v", key, payload)
 		}
+	}
+}
+
+// postTruncatedUpload 模拟「发送端写到一半断线」：声明 declared 字节，
+// 实际只写 partial，然后直接关掉连接，接收端会读到 io.ErrUnexpectedEOF。
+//
+// 用 io.Pipe 做请求体：bytes.Reader 会立刻把它自己的内容读成 EOF，net/http 在
+// 发送前就会发现「ContentLength 比实际内容大」；pipe 不给 EOF，服务端才会真的
+// 读到半截请求体。写端要在请求结束后再关闭，否则客户端可能先报 write error。
+func postTruncatedUpload(t *testing.T, baseURL, sessionID, fileID, token string, declared int64, partial []byte) {
+	t.Helper()
+
+	pr, pw := io.Pipe()
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/localsend/v2/upload", pr)
+	if err != nil {
+		t.Fatalf("build upload request: %v", err)
+	}
+	q := req.URL.Query()
+	q.Set("sessionId", sessionID)
+	q.Set("fileId", fileID)
+	q.Set("token", token)
+	req.URL.RawQuery = q.Encode()
+	req.ContentLength = declared
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, werr := pw.Write(partial)
+		errCh <- werr
+		// 不关写端：让服务端一直等剩下的 declared-len(partial) 字节。
+		_ = pr.CloseWithError(io.ErrUnexpectedEOF)
+	}()
+
+	// 请求必然失败（连接被服务端掐断），忽略这个错误——真正要断言的
+	// 是接收端有没有把文件落成失败终态。
+	//nolint:errcheck // 见上
+	resp, _ := http.DefaultClient.Do(req)
+	if resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}
+	<-errCh
+
+	// 断线之后 handler 要一点时间才会返回并落失败终态，这里等它处理完
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if store.activeSession() == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// prepareFromOtherDevice 用另一台设备的来源 IP 发 prepare，返回状态码。
+func prepareFromOtherDevice(t *testing.T, peerIP string, req models.PrepareReceiveRequest) int {
+	t.Helper()
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal prepare: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/localsend/v2/prepare-upload", bytes.NewReader(body))
+	r.RemoteAddr = peerIP + ":41234"
+	PrepareReceive(rec, r)
+	return rec.Code
+}
+
+// TestInterruptedUploadReleasesSession 传输中断后，文件必须落失败终态：
+// 会话不再占用唯一传输通道，另一台设备的 prepare 不能再拿到 409。
+//
+// 这是「发送端断线后本机永久 409、只能重启进程」那个阻断问题的回归测试。
+func TestInterruptedUploadReleasesSession(t *testing.T) {
+	workDir := isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const fileName = "big.bin"
+	content := bytes.Repeat([]byte("x"), 1000)
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(content)), SHA256: sha256Hex(content)},
+	})
+
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+
+	// 声明 1000 字节、只发 3 字节：接收端读到 UnexpectedEOF
+	postTruncatedUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], int64(len(content)), content[:3])
+
+	// 中断的会话必须已经让出通道
+	if active := store.activeSession(); active != nil {
+		t.Fatalf("session %s still blocks transfers after abort", active.id)
+	}
+	if code := prepareFromOtherDevice(t, "10.0.0.99", prepareRequest(map[string]models.FileInfo{
+		"other.txt": {ID: "other.txt", FileName: "other.txt", Size: 1},
+	})); code != http.StatusOK {
+		t.Fatalf("prepare from another device status = %d, want 200", code)
+	}
+
+	// 也没有留下半截文件或临时文件
+	if _, err := os.Stat(filepath.Join(workDir, uploadBaseDir, fileName)); !os.IsNotExist(err) {
+		t.Fatalf("aborted upload must not leave a file, err = %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(workDir, uploadBaseDir))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read uploads dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".localsend-") {
+			t.Fatalf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestChecksumMismatchReleasesSession 422 之后会话同样要让位，
+// 否则一次校验失败就能把本机永久锁在 409 里。
+func TestChecksumMismatchReleasesSession(t *testing.T) {
+	isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const fileName = "bad.txt"
+	content := []byte("hello")
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(content)), SHA256: sha256Hex(content)},
+	})
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+
+	tampered := append([]byte(nil), content...)
+	tampered[0] ^= 0xFF
+	if got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], tampered); got != http.StatusUnprocessableEntity {
+		t.Fatalf("tampered upload status = %d, want 422", got)
+	}
+
+	if active := store.activeSession(); active != nil {
+		t.Fatalf("session %s still blocks transfers after 422", active.id)
+	}
+	if code := prepareFromOtherDevice(t, "10.0.0.99", prepareRequest(map[string]models.FileInfo{
+		"other.txt": {ID: "other.txt", FileName: "other.txt", Size: 1},
+	})); code != http.StatusOK {
+		t.Fatalf("prepare from another device status = %d, want 200", code)
+	}
+}
+
+// TestInterruptedUploadCanResume 中断后同一个发送端重新 prepare 应该能续传：
+// 失败终态的文件不算「已经传完」，重传是合法的。
+func TestInterruptedUploadCanResume(t *testing.T) {
+	workDir := isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const fileName = "resume.bin"
+	content := bytes.Repeat([]byte("y"), 512)
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(content)), SHA256: sha256Hex(content)},
+	})
+
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+	postTruncatedUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], int64(len(content)), content[:10])
+
+	// 重发 prepare：没有活跃会话挡路，文件也没落盘，因此不该回 204
+	code, body = postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("resume prepare status = %d, want 200 (body %q)", code, body)
+	}
+	resp = models.PrepareReceiveResponse{}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+	if got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], content); got != http.StatusOK {
+		t.Fatalf("resumed upload status = %d, want 200", got)
+	}
+	got, err := os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("resumed file content mismatch: err = %v, len = %d", err, len(got))
+	}
+}
+
+// TestUploadTokenReplayRejected 文件传完之后，同一个 sessionId/fileId/token
+// 再传一次必须被拒，且不能覆盖 uploads/ 下的文件。官方要求 file.status == Pending。
+func TestUploadTokenReplayRejected(t *testing.T) {
+	workDir := isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const fileName = "once.txt"
+	content := []byte("first payload")
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(content)), SHA256: sha256Hex(content)},
+	})
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+
+	if got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], content); got != http.StatusOK {
+		t.Fatalf("first upload status = %d, want 200", got)
+	}
+
+	// 第二次、第三次重放：都必须被拒
+	for i := 2; i <= 3; i++ {
+		got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], []byte("overwrite!"))
+		if got != http.StatusConflict {
+			t.Fatalf("replay #%d status = %d, want 409", i, got)
+		}
+	}
+
+	stored, err := os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
+	if err != nil {
+		t.Fatalf("read stored file: %v", err)
+	}
+	if !bytes.Equal(stored, content) {
+		t.Fatalf("replay overwrote the file: %q", stored)
+	}
+}
+
+// TestUploadTokenReplayRejectedSamePeer 同一发送端重发 prepare 换了新会话 id，
+// 用旧 token 重放同样要被拒——token 只由 fileId 决定，不会随会话变化。
+func TestUploadTokenReplayRejectedSamePeer(t *testing.T) {
+	workDir := isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const fileName = "once2.txt"
+	content := []byte("payload")
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(content)), SHA256: sha256Hex(content)},
+	})
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+	if got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], content); got != http.StatusOK {
+		t.Fatalf("first upload status = %d, want 200", got)
+	}
+
+	// 同一来源重发 prepare：同内容的文件已存在 → 204，拿不到新会话
+	code, _ = postPrepare(t, srv.URL, "", req)
+	if code != http.StatusNoContent {
+		t.Fatalf("duplicate prepare status = %d, want 204", code)
+	}
+	// 旧 token + 旧会话 id 重放
+	if got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], []byte("overwrite!")); got == http.StatusOK {
+		t.Fatal("replay after 204 must not be accepted")
+	}
+	stored, err := os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
+	if err != nil || !bytes.Equal(stored, content) {
+		t.Fatalf("stored file changed: %q, err = %v", stored, err)
 	}
 }
