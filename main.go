@@ -359,6 +359,12 @@ func ReceiveMode() {
 
 func SendMode(filePath string) {
 	err := handlers.SendFile(filePath)
+	reportSendResult(err)
+}
+
+// reportSendResult 统一处理发送结果：204（无需传输）已经是成功路径，
+// SendFile 内部按 ErrNothingToTransfer 提前返回了 nil，这里只需报错分支。
+func reportSendResult(err error) {
 	if err != nil {
 		logger.Errorf("Send failed: %v", err)
 	}
@@ -366,10 +372,7 @@ func SendMode(filePath string) {
 
 // SendTextMode 把文本封装成虚拟 .txt 文件发送，复用 SendFile 的 prepare/upload 流程。
 func SendTextMode(text string) {
-	err := handlers.SendText(text)
-	if err != nil {
-		logger.Errorf("Send failed: %v", err)
-	}
+	reportSendResult(handlers.SendText(text))
 }
 
 // runSendCommand 统一处理 `send` 子命令的参数解析、校验与分发。
@@ -382,6 +385,14 @@ func runSendCommand(args []string) {
 		fmt.Fprintf(os.Stderr, "send: %v\n", err)
 		sendUsage()
 		os.Exit(1)
+	}
+
+	// send --pin 才是「对端接收端的 PIN」，与全局 --pin（本机接收端的 PIN）分开存，
+	// 两者互不覆盖：本机要求 123456 不代表对端也要求 123456。
+	// 命令行优先；没给就看环境变量（避免把 PIN 写进 shell history）。
+	config.ConfigData.SetSendPIN(opts.PeerPIN)
+	if config.ConfigData.SendPIN() == "" {
+		config.ConfigData.SetSendPIN(os.Getenv(config.EnvSendPIN))
 	}
 
 	text, isText, err := opts.resolve(readClipboard)
@@ -400,9 +411,10 @@ func runSendCommand(args []string) {
 
 // sendUsage 打印 send 子命令的用法。
 func sendUsage() {
-	fmt.Fprintln(os.Stderr, "Usage: localsend-go send <file_path>")
-	fmt.Fprintln(os.Stderr, "       localsend-go send --text \"<content>\"")
-	fmt.Fprintln(os.Stderr, "       localsend-go send --clipboard")
+	fmt.Fprintln(os.Stderr, "Usage: localsend-go send [--pin <peer_pin>] <file_path>")
+	fmt.Fprintln(os.Stderr, "       localsend-go send [--pin <peer_pin>] --text \"<content>\"")
+	fmt.Fprintln(os.Stderr, "       localsend-go send [--pin <peer_pin>] --clipboard")
+	fmt.Fprintln(os.Stderr, "  --pin <peer_pin>  对端接收端要求的 PIN（可用 "+config.EnvSendPIN+" 环境变量提供）")
 }
 
 // showHelp 打印全局帮助信息。
@@ -413,18 +425,23 @@ func showHelp() {
 	fmt.Println("  send <file_path>    Send a file or directory")
 	fmt.Println("  send --text <text>  Send a piece of text (as a virtual .txt file)")
 	fmt.Println("  send --clipboard    Send local clipboard content as text")
+	fmt.Println("  send --pin <pin>    PIN required by the *remote* receiver")
 	fmt.Println("  receive             Start Receive mode")
 	fmt.Println("  help                Display this help information")
 	fmt.Println("Options:")
 	fmt.Println("  --help              Display this help information")
 	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
 	fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
+	fmt.Println("  --pin=<pin>         Require this PIN on *this* device's receiver (overrides functions.pin)")
 	fmt.Println("")
 	fmt.Println("Config lookup order: --config/LOCALSEND_CONFIG > ./config.yaml >")
 	fmt.Println("  user config dir (e.g. ~/.config/localsend-go/config.yaml) >")
 	fmt.Println("  legacy internal/config/config.yaml > embedded defaults")
 	fmt.Println("Notes:")
 	fmt.Println("  send 的 <file_path>、--text、--clipboard 三者互斥，同时给出会报错退出")
+	fmt.Println("  接收端 PIN 与对端 PIN 是两件事，互不影响：")
+	fmt.Println("    localsend-go --pin 123456 receive     # 本机要求 123456")
+	fmt.Println("    localsend-go send --pin 654321 a.txt  # 对端要求 654321")
 }
 
 func ExitMode() {
@@ -461,11 +478,17 @@ func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
 var (
 	port       int
 	configPath string
+	pin        string
 )
 
 func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
 	flag.StringVar(&configPath, "config", "", "Path to config file")
+	// --pin 是「本机接收端」的配置，属于全局参数，必须写在子命令之前：
+	// `localsend-go --pin 123456 receive`。
+	// 发送时提供给对端的 PIN 由 `send --pin` 单独提供（见 send_flags.go），
+	// 二者独立存储，互相不会覆盖。
+	flag.StringVar(&pin, "pin", "", "PIN required by this device's receiver (overrides functions.pin in config)")
 }
 
 func main() {
@@ -495,6 +518,11 @@ func main() {
 	config.SetPath(configPath)
 	// 提前加载配置，方便在启动日志里提示实际使用的配置文件
 	config.Load()
+	// 命令行 --pin 优先于配置文件里的 functions.pin
+	if strings.TrimSpace(pin) != "" {
+		config.ConfigData.SetPIN(pin)
+		logger.Infof("Receiver PIN enabled via --pin")
+	}
 	// 配置就绪后再同步广播消息里的设备名与监听端口
 	shared.SyncFromConfig()
 	shared.SetListenPort(port)

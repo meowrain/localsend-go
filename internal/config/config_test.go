@@ -230,3 +230,71 @@ func TestApplyDefaults(t *testing.T) {
 		t.Fatal("unspecified switch should fall back to default")
 	}
 }
+
+// TestPINConfig 覆盖 functions.pin：默认空（不启用），可被配置与 SetPIN 覆盖。
+func TestPINConfig(t *testing.T) {
+	if got := DefaultConfig().Functions.PIN; got != "" {
+		t.Fatalf("default pin = %q, want empty", got)
+	}
+
+	dir := withTempCwd(t)
+	isolateConfigEnv(t, filepath.Join(dir, "cfgdir"))
+	writeFile(t, filepath.Join(dir, configFileName), "functions:\n  pin: \"246810\"\n  skip_existing: false\n")
+	Load()
+
+	if got := ConfigData.Functions.PIN; got != "246810" {
+		t.Fatalf("pin = %q, want 246810", got)
+	}
+	if ConfigData.SkipExistingEnabled() {
+		t.Fatal("skip_existing: false should disable the 204 shortcut")
+	}
+
+	// --pin 的等价入口：SetPIN 覆盖配置值，空白会被裁掉
+	ConfigData.SetPIN("  135790 ")
+	if got := ConfigData.Functions.PIN; got != "135790" {
+		t.Fatalf("pin after SetPIN = %q, want 135790", got)
+	}
+}
+
+// TestSkipExistingDefaultOn 没写 skip_existing 时默认开启。
+func TestSkipExistingDefaultOn(t *testing.T) {
+	if !DefaultConfig().SkipExistingEnabled() {
+		t.Fatal("skip_existing should default to true")
+	}
+	var zero Config
+	if !zero.SkipExistingEnabled() {
+		t.Fatal("nil skip_existing should be treated as enabled")
+	}
+}
+
+// TestSendPINIsolation 接收端 PIN（functions.pin）与发送端对端 PIN 必须互不影响：
+// 前者能被配置/--pin 设置，后者只来自 send --pin 或环境变量。
+func TestSendPINIsolation(t *testing.T) {
+	dir := withTempCwd(t)
+	isolateConfigEnv(t, filepath.Join(dir, "cfgdir"))
+	// 配置文件里即使写了 send_pin 也不该生效（它属于运行时参数，不落盘）
+	writeFile(t, filepath.Join(dir, configFileName), "functions:\n  pin: \"123456\"\n  send_pin: \"999999\"\n")
+	Load()
+
+	if got := ConfigData.ReceiverPIN(); got != "123456" {
+		t.Fatalf("receiver pin = %q, want 123456", got)
+	}
+	if got := ConfigData.SendPIN(); got != "" {
+		t.Fatalf("send pin = %q, want empty (must not come from config file)", got)
+	}
+
+	// 设置对端 PIN 不影响本机接收端
+	ConfigData.SetSendPIN(" 654321 ")
+	if got := ConfigData.SendPIN(); got != "654321" {
+		t.Fatalf("send pin = %q, want 654321", got)
+	}
+	if got := ConfigData.ReceiverPIN(); got != "123456" {
+		t.Fatalf("receiver pin changed to %q, want 123456", got)
+	}
+
+	// 反过来也一样
+	ConfigData.SetPIN("111111")
+	if got := ConfigData.SendPIN(); got != "654321" {
+		t.Fatalf("send pin changed to %q, want 654321", got)
+	}
+}

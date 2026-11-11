@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -115,5 +116,49 @@ func TestParseErrorMessageTruncates(t *testing.T) {
 	got := parseErrorMessage([]byte(strings.Repeat("x", maxErrorBodyBytes*2)))
 	if len(got) > maxErrorBodyBytes {
 		t.Fatalf("message len = %d, want <= %d", len(got), maxErrorBodyBytes)
+	}
+}
+
+// TestPrepareErrorHint 401/403/409/429 都要给出可操作的中文提示。
+func TestPrepareErrorHint(t *testing.T) {
+	cases := []struct {
+		status int
+		want   string
+	}{
+		{http.StatusUnauthorized, "--pin"},
+		{http.StatusForbidden, "拒绝"},
+		{http.StatusConflict, "另一个传输会话"},
+		{http.StatusTooManyRequests, "尝试次数过多"},
+		{http.StatusInternalServerError, ""},
+	}
+	for _, tc := range cases {
+		err := describePrepareError(makeResponse(tc.status, ""))
+		got := prepareErrorHint(err)
+		if tc.want == "" {
+			if got != "" {
+				t.Fatalf("status %d should have no hint, got %q", tc.status, got)
+			}
+			continue
+		}
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("status %d hint = %q, want it to contain %q", tc.status, got, tc.want)
+		}
+	}
+	// 非状态码错误不产生提示
+	if got := prepareErrorHint(errors.New("boom")); got != "" {
+		t.Fatalf("plain error should have no hint, got %q", got)
+	}
+}
+
+// TestNoContentIsNotAnError 204 会被翻译成 ErrNothingToTransfer，调用方据此当成功处理。
+func TestNoContentIsNotAnError(t *testing.T) {
+	err := describePrepareError(makeResponse(http.StatusNoContent, ""))
+	if err == nil {
+		t.Fatal("204 should still produce an error value for the caller to translate")
+	}
+	// 发送端在 sendPrepareRequest 里把它包成 ErrNothingToTransfer
+	wrapped := fmt.Errorf("%w: %v", ErrNothingToTransfer, err)
+	if !errors.Is(wrapped, ErrNothingToTransfer) {
+		t.Fatal("204 should be recognisable as ErrNothingToTransfer")
 	}
 }

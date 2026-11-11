@@ -111,3 +111,36 @@ func TestSendOptionsResolve(t *testing.T) {
 		}
 	})
 }
+
+// TestSendOptionsPeerPIN `send --pin` 是对端 PIN，与来源参数互不影响。
+func TestSendOptionsPeerPIN(t *testing.T) {
+	opts, err := parseSendOptions([]string{"--pin", " 654321 ", "a.txt"}, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.PeerPIN != "654321" {
+		t.Fatalf("peer pin = %q, want 654321 (should be trimmed)", opts.PeerPIN)
+	}
+	if opts.FilePath != "a.txt" || opts.SourceCount() != 1 {
+		t.Fatalf("peer pin must not affect source parsing: %+v", opts)
+	}
+
+	// 不带 --pin 时为空：不会凭空带上本机接收端的 PIN
+	opts, err = parseSendOptions([]string{"a.txt"}, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.PeerPIN != "" {
+		t.Fatalf("peer pin = %q, want empty", opts.PeerPIN)
+	}
+
+	// 只给 --pin 而不给来源仍然要报错
+	if _, err := parseSendOptions([]string{"--pin", "123456"}, io.Discard); err == nil {
+		t.Fatal("send --pin alone should fail: missing source")
+	}
+
+	// 重复给出直接拒绝
+	if _, err := parseSendOptions([]string{"--pin", "1", "--pin", "2", "a.txt"}, io.Discard); err == nil {
+		t.Fatal("duplicate --pin should be rejected")
+	}
+}

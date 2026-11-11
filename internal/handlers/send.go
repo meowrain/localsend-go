@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meowrain/localsend-go/internal/config"
 	"github.com/meowrain/localsend-go/internal/discovery"
 	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/models"
@@ -54,6 +56,10 @@ func fileMetadata(filePath string, info os.FileInfo) (models.FileInfo, error) {
 		// 官方 App 依赖它决定预览与保存策略。
 		FileType: mimeTypeForPath(filePath),
 		SHA256:   sha256Hash,
+		// metadata 是 2.1 新增的可空字段。只填 os.FileInfo 能拿到的 modified；
+		// accessed（atime）在 Windows 上取不到、Linux/macOS 上又要平台特定 syscall，
+		// 收益极低，因此一律留空（协议标注 nullable，接收端必须容忍缺失）。
+		Metadata: &models.FileMetadata{Modified: info.ModTime().UTC().Format(time.RFC3339)},
 	}, nil
 }
 
@@ -82,7 +88,7 @@ func SendFileToOtherDevicePrepare(device models.SendModel, path string) (*models
 }
 
 // sendPrepareRequest 把已构造好的 prepare 请求发出去并解析响应。
-// 目标地址由 device 的 Protocol/Port 决定。
+// 目标地址由 device 的 Protocol/Port 决定；本机配置了 PIN 时自动带上 ?pin=。
 func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRequest) (*models.PrepareReceiveResponse, error) {
 	// 将请求结构体编码为JSON
 	requestJson, err := json.Marshal(request)
@@ -92,6 +98,15 @@ func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRe
 
 	// 发送POST请求：协议与端口取自对端广播，不再写死 https/53317
 	prepareURL := buildSendURL(device, "/api/localsend/v2/prepare-upload")
+	// PIN 走查询参数（协议 4.1）。这里取的是「对端的 PIN」，不是本机接收端的 PIN：
+	// 两者含义完全不同，混用会让 `--pin` 互相污染（本机要求 123456，就一定会拿
+	// 123456 去开对端）。
+	// 用 url.Values 编码，PIN 里出现 & # % 空格之类的字符时才不会把查询串拼坏。
+	if pin := config.ConfigData.SendPIN(); pin != "" {
+		query := url.Values{}
+		query.Set("pin", pin)
+		prepareURL += "?" + query.Encode()
+	}
 	client := &http.Client{
 		Timeout: 60 * time.Second, // 传输超时
 		Transport: &http.Transport{
@@ -108,7 +123,16 @@ func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRe
 
 	// 检查响应
 	if resp.StatusCode != http.StatusOK {
-		return nil, describePrepareError(resp)
+		err := describePrepareError(resp)
+		// 204 不是错误：接收端判断这些文件已经在它那里且内容一致，本次传输结束
+		if resp.StatusCode == statusFinished {
+			return nil, fmt.Errorf("%w: %v", ErrNothingToTransfer, err)
+		}
+		// 401/403/409/429 补一句可操作的中文提示，直接透出给用户
+		if hint := prepareErrorHint(err); hint != "" {
+			return nil, fmt.Errorf("%w（%s）", err, hint)
+		}
+		return nil, err
 	}
 
 	// 解码响应JSON为PrepareReceiveResponse结构体
@@ -118,6 +142,42 @@ func sendPrepareRequest(device models.SendModel, request models.PrepareReceiveRe
 	}
 
 	return &prepareReceiveResponse, nil
+}
+
+// uploadRetryMax 是单个文件的上传尝试次数上限（含首次）。
+//
+// 只有 422（校验和不匹配）会重试：官方发送端对「内容传完但校验失败」最多重试
+// 3 次，之后放弃。其余状态码（403 token 失效、409 会话被占、5xx 落盘失败）
+// 重试也不会有不同结果，直接失败让用户看到真实原因。
+const uploadRetryMax = 3
+
+// retryableUpload 判断这个错误值不值得再传一次，目前只认 422。
+func retryableUpload(err error) bool {
+	var sce *statusCodeError
+	return errors.As(err, &sce) && sce.Status == statusChecksumMismatch
+}
+
+// uploadWithRetry 给 uploadContent 加上限次重试。
+// open 用来在每次重试时取一份新的内容源：ReadCloser 已经被上一次读到底，
+// 复用同一个只会第二次发出 0 字节。
+func uploadWithRetry(ctx context.Context, device models.SendModel, sessionId, fileId, token string, open func() (io.ReadCloser, int64, error)) error {
+	var lastErr error
+	for attempt := 1; attempt <= uploadRetryMax; attempt++ {
+		src, size, err := open()
+		if err != nil {
+			return err
+		}
+		err = uploadContent(ctx, device, sessionId, fileId, token, size, src)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retryableUpload(err) || ctx.Err() != nil || attempt == uploadRetryMax {
+			break
+		}
+		logger.Warnf("Upload of %s rejected with 422, retrying (%d/%d)", fileId, attempt, uploadRetryMax)
+	}
+	return lastErr
 }
 
 // uploadContent 通过 /upload 接口发送一段内容，size 为总字节数，src 由调用方负责关闭。
@@ -252,7 +312,15 @@ func prepareAndUpload(spec sendSpec) error {
 	}
 	response, err := spec.prepare(device)
 	if err != nil {
+		// 204：接收端判断无需传输，这是正常结束，不是失败
+		if errors.Is(err, ErrNothingToTransfer) {
+			logger.Success("Receiver already has all files, nothing to transfer")
+			return nil
+		}
 		return err
+	}
+	if response == nil {
+		return nil
 	}
 
 	// 创建一个用于取消的 context
@@ -269,11 +337,7 @@ func prepareAndUpload(spec sendSpec) error {
 		if !ok {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("token not found for file: %s", entry.file.name))
 		}
-		src, size, err := entry.open()
-		if err != nil {
-			return err
-		}
-		if err := uploadContent(ctx, device, response.SessionID, fileID, token, size, src); err != nil {
+		if err := uploadWithRetry(ctx, device, response.SessionID, fileID, token, entry.open); err != nil {
 			return fmt.Errorf("error walking the path: %w", fmt.Errorf("error uploading file: %w", err))
 		}
 	}
@@ -344,6 +408,8 @@ func SendText(text string) error {
 		FileType: defaultTextMimeType, // 协议要求 fileType 是 MIME，不是扩展名
 		SHA256:   sha256OfBytes(content),
 		Preview:  TruncatePreview(text),
+		// 虚拟文件没有真实 mtime，用当前时间，保证接收端能拿到一个可解析的 metadata
+		Metadata: &models.FileMetadata{Modified: time.Now().UTC().Format(time.RFC3339)},
 	}
 
 	return prepareAndUpload(sendSpec{

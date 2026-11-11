@@ -271,9 +271,15 @@ func TestSafeJoinUnder(t *testing.T) {
 	}
 }
 
-// TestConcurrentPrepareAndUpload 用 -race 跑并发的 Prepare / Upload，验证 fileNames 一类的共享 map 已加锁。
+// TestConcurrentPrepareAndUpload 用 -race 跑并发的 Prepare / Upload，验证会话表的共享状态已加锁。
+//
+// 协议 v2 规定同一时间只允许一个活跃会话，因此这里让各 goroutine 自己完整跑完
+// 「prepare -> upload」，两类失败都要再重试：并发之间互相 409 是预期行为；
+// upload 侧也可能 403/409——prepare 与 upload 之间会话被别的发送端抢走、
+// 或同源重试把会话 id 换掉。真实发送端遇到这两种情况就是重新 prepare，
+// 这里照做，真正要验证的是「不数据竞争、且最终每个文件都完整落盘」。
 func TestConcurrentPrepareAndUpload(t *testing.T) {
-	chdirTemp(t)
+	workDir := chdirTemp(t)
 
 	const workers = 16
 	var wg sync.WaitGroup
@@ -284,28 +290,71 @@ func TestConcurrentPrepareAndUpload(t *testing.T) {
 			fileName := fmt.Sprintf("并发文件-%d.txt", i)
 			req := models.PrepareReceiveRequest{
 				Info:  models.Info{Alias: "tester"},
-				Files: map[string]models.FileInfo{fileName: {ID: fileName, FileName: fileName, Size: 1}},
-			}
-			body, _ := json.Marshal(req)
-			rec := httptest.NewRecorder()
-			PrepareReceive(rec, httptest.NewRequest(http.MethodPost, "/api/localsend/v2/prepare-upload", bytes.NewReader(body)))
-			if rec.Code != http.StatusOK {
-				t.Errorf("PrepareReceive status = %d", rec.Code)
-				return
+				Files: map[string]models.FileInfo{fileName: {ID: fileName, FileName: fileName, Size: 4}},
 			}
 			var resp models.PrepareReceiveResponse
-			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-				t.Errorf("decode response: %v", err)
+			// 唯一活跃会话的约束下，抢不到会话的请求会 409，退避后重试即可。
+			// 每次重试都要重新编码 body：bytes.Reader 会被 Decode 读空。
+			for attempt := 0; attempt < 200; attempt++ {
+				body, _ := json.Marshal(req)
+				rec := httptest.NewRecorder()
+				PrepareReceive(rec, httptest.NewRequest(http.MethodPost, "/api/localsend/v2/prepare-upload", bytes.NewReader(body)))
+				if rec.Code == http.StatusConflict {
+					time.Sleep(time.Millisecond)
+					continue
+				}
+				if rec.Code != http.StatusOK {
+					t.Errorf("PrepareReceive status = %d", rec.Code)
+					return
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+					t.Errorf("decode response: %v", err)
+					return
+				}
+				break
+			}
+			if resp.SessionID == "" {
+				t.Errorf("no session acquired for %s", fileName)
 				return
 			}
-			rec2 := httptest.NewRecorder()
-			ReceiveHandler(rec2, uploadRequest(resp.SessionID, fileName, resp.Files[fileName], "data"))
-			if rec2.Code != http.StatusOK {
-				t.Errorf("ReceiveHandler status = %d, body = %s", rec2.Code, rec2.Body.String())
+			for attempt := 0; attempt < 200; attempt++ {
+				rec2 := httptest.NewRecorder()
+				ReceiveHandler(rec2, uploadRequest(resp.SessionID, fileName, resp.Files[fileName], "data"))
+				if rec2.Code == http.StatusOK {
+					return
+				}
+				if rec2.Code != http.StatusForbidden && rec2.Code != http.StatusConflict {
+					t.Errorf("ReceiveHandler status = %d, body = %s", rec2.Code, rec2.Body.String())
+					return
+				}
+				// 会话已被别人抢占：重新 prepare 拿一份新的会话再传
+				body, _ := json.Marshal(req)
+				rec3 := httptest.NewRecorder()
+				PrepareReceive(rec3, httptest.NewRequest(http.MethodPost, "/api/localsend/v2/prepare-upload", bytes.NewReader(body)))
+				if rec3.Code != http.StatusOK {
+					continue
+				}
+				resp = models.PrepareReceiveResponse{}
+				if err := json.Unmarshal(rec3.Body.Bytes(), &resp); err != nil {
+					t.Errorf("decode response: %v", err)
+					return
+				}
 			}
+			t.Errorf("upload never succeeded for %s", fileName)
 		}(i)
 	}
 	wg.Wait()
+
+	for i := 0; i < workers; i++ {
+		name := fmt.Sprintf("并发文件-%d.txt", i)
+		got, err := os.ReadFile(filepath.Join(workDir, uploadBaseDir, name))
+		if err != nil {
+			t.Fatalf("missing upload %s: %v", name, err)
+		}
+		if string(got) != "data" {
+			t.Fatalf("%s content = %q, want %q", name, got, "data")
+		}
+	}
 }
 
 // TestSessionStoreEviction 验证会话数量上限，避免长跑进程内存无限增长。
@@ -314,7 +363,7 @@ func TestSessionStoreEviction(t *testing.T) {
 	t.Cleanup(store.reset)
 
 	for i := 0; i < maxSessions+10; i++ {
-		store.add(&receiveSession{id: fmt.Sprintf("s-%d", i), tokens: map[string]string{}, names: map[string]string{}})
+		store.add(&receiveSession{id: fmt.Sprintf("s-%d", i), files: map[string]*receiveFile{}})
 	}
 	store.mu.RLock()
 	n := len(store.sessions)
@@ -329,10 +378,10 @@ func TestSessionStoreEvictionKeepsActive(t *testing.T) {
 	store.reset()
 	t.Cleanup(store.reset)
 
+	// 未结束的会话必须活下来：它才是真正在传输的那个
 	active := &receiveSession{
 		id:       "active",
-		tokens:   map[string]string{},
-		names:    map[string]string{},
+		files:    map[string]*receiveFile{"f": {name: "a.txt", token: "t", done: false}},
 		created:  time.Now().Add(-time.Hour),
 		lastUsed: time.Now(),
 	}
@@ -340,16 +389,14 @@ func TestSessionStoreEvictionKeepsActive(t *testing.T) {
 	for i := 0; i < maxSessions-1; i++ {
 		store.add(&receiveSession{
 			id:      fmt.Sprintf("s-%d", i),
-			tokens:  map[string]string{},
-			names:   map[string]string{},
+			files:   map[string]*receiveFile{},
 			created: time.Now().Add(-time.Minute),
 		})
 	}
 	// 再塞一个触发淘汰：最久未使用的应该是 created 更早的其它会话，而不是 active
 	store.add(&receiveSession{
 		id:      "trigger",
-		tokens:  map[string]string{},
-		names:   map[string]string{},
+		files:   map[string]*receiveFile{},
 		created: time.Now(),
 	})
 

@@ -12,9 +12,17 @@ import (
 // maxErrorBodyBytes 限制读取错误响应体的长度，避免对端返回巨大内容时把内存吃满。
 const maxErrorBodyBytes = 4 << 10
 
-// 错误码映射直接写在下面的 switch 里（protocol/README.md 4.1 / 4.2 错误表）：
-// 之前还定义了一组 statusFinished / statusPINRequired 之类的常量，但没人引用，
-// 只是把同一份映射写了两遍，删掉避免两处漂移。
+// 接收端产生这些状态码的地方（prepare-upload / upload）统一用这里的常量，
+// 避免发送端与接收端各写一份字面量、改一处漏一处。
+const (
+	statusFinished         = http.StatusNoContent           // 204：无需传输
+	statusPINRequired      = http.StatusUnauthorized        // 401：需要 PIN
+	statusInvalidPIN       = http.StatusUnauthorized        // 401：PIN 错误
+	statusRejected         = http.StatusForbidden           // 403：被接收端拒绝
+	statusBlockedBySession = http.StatusConflict            // 409：已有活跃会话
+	statusChecksumMismatch = http.StatusUnprocessableEntity // 422：sha256 不匹配
+	statusTooManyRequests  = http.StatusTooManyRequests     // 429：PIN 尝试过多
+)
 
 // statusCodeError 表示对端返回了非预期的 HTTP 状态码。
 // 带上 Message 是为了让上层能把对端的说明透出来；
@@ -131,4 +139,30 @@ func newStatusError(resp *http.Response, fallback string) error {
 		status = resp.StatusCode
 	}
 	return &statusCodeError{Status: status, Message: msg}
+}
+
+// ErrNothingToTransfer 表示接收端回了 204：它已持有本次要传的全部文件，
+// 发送端不需要做任何事。这是正常结束，调用方应当当作成功处理。
+var ErrNothingToTransfer = errors.New("nothing to transfer")
+
+// prepareErrorHint 给 prepare-upload 的失败补一句「接下来该怎么办」。
+// 协议只定义状态码语义，用户看到 401/409/429 很难知道该改什么参数。
+func prepareErrorHint(err error) string {
+	var sce *statusCodeError
+	if !errors.As(err, &sce) {
+		return ""
+	}
+	switch sce.Status {
+	case http.StatusNoContent:
+		return "对方判断这些文件已存在且内容一致，本次传输已完成"
+	case http.StatusUnauthorized:
+		return "对方开启了 PIN 校验：请用 send --pin <对方显示的 PIN> 重新发送（只看对端，与本机 --pin 无关）"
+	case http.StatusForbidden:
+		return "对方拒绝了本次传输（可能正在等待用户确认，或已手动拒绝）"
+	case http.StatusConflict:
+		return "对方正忙于另一个传输会话：等当前会话结束后重试，或让对方取消"
+	case http.StatusTooManyRequests:
+		return "PIN 尝试次数过多，已被暂时限制：等几分钟后重试，并确认 PIN 输入正确"
+	}
+	return ""
 }
