@@ -192,6 +192,9 @@ $:
       stages:
         - name: npc go
           type: npc:go
+          options:
+            model: deepseek-v4.1-flash
+            supportImage: true
 
   pull_request.comment@npc:
     - docker:
@@ -199,3 +202,6 @@ $:
       stages:
         - name: npc go
           type: npc:go
+          options:
+            model: deepseek-v4.1-flash
+            supportImage: true
