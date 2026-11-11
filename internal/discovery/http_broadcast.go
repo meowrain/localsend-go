@@ -16,7 +16,9 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		data, err := json.Marshal(shared.Message)
+		// HTTP 探测发的是 register 请求体，与 UDP 公告不是同一个载荷：
+		// 协议 3.1 / 3.2 的 register 请求体里没有 announce 字段。
+		data, err := json.Marshal(shared.RegisterRequest())
 		if err != nil {
 			logger.Errorf("Failed to marshal message: %v", err)
 			continue

@@ -53,10 +53,13 @@ var Message = models.BroadcastMessage{
 	// 本机没有实现下载 API，所以必须报 false：报 true 等于对外承诺一个会 404 的能力，
 	// 对端会据此展示「下载」入口并在点击后失败。等 5.2 / 5.3 真正实现后再改成 true。
 	Download: false,
-	// 公告里不带 announce：它只属于多播公告（协议 3.1），POST /v2/register 的
-	// 请求体与响应体都没有这个字段。用 omitempty 避免把无效字段发给对端。
-	// 注意：收到 UDP 公告后的回发由 udp_broadcast 单独处理，不依赖本字段。
-	Announce: false,
+	// Announce 必须是 true：Message 同时被用于 UDP 多播公告（udp_broadcast.go），
+	// 而协议 3.1 明确「A response is only triggered when announce is true」。
+	// 早期版本把它改成 false 来「避免污染 register 请求体」，结果本机的公告
+	// 没有任何对端会回应，双向发现在两个方向上都断了。
+	// 正确做法是让 register 请求体走 models.RegisterRequest（不含 announce 字段），
+	// 而不是篡改公告本身。
+	Announce: true,
 }
 
 // NewFingerprint 生成一个随机的设备指纹（32 位十六进制串）。
@@ -87,5 +90,24 @@ func SyncFromConfig() {
 func SetListenPort(port int) {
 	if port > 0 {
 		Message.Port = port
+	}
+}
+
+// RegisterRequest 把本机的设备信息转成 POST /api/localsend/v2/register 的请求体。
+//
+// 单独抽出来是因为 Message 同时还承担着 UDP 多播公告的角色，两者字段并不相同：
+// 公告必须带 announce: true（协议 3.1：对端只在 announce == true 时才会回复），
+// 而 register 的请求体/响应体里没有 announce 这个字段。直接 Marshal(Message)
+// 要么把 announce 带进请求体，要么为了干净而把公告也弄脏——两条路都是错的。
+func RegisterRequest() models.RegisterRequest {
+	return models.RegisterRequest{
+		Alias:       Message.Alias,
+		Version:     Message.Version,
+		DeviceModel: Message.DeviceModel,
+		DeviceType:  Message.DeviceType,
+		Fingerprint: Message.Fingerprint,
+		Port:        Message.Port,
+		Protocol:    Message.Protocol,
+		Download:    Message.Download,
 	}
 }

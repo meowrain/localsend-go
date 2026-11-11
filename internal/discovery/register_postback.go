@@ -75,8 +75,11 @@ func buildRegisterPeer(ip string, message models.BroadcastMessage) registerPeer 
 
 // postRegister 真正发出 POST /api/localsend/v2/register，请求体是本机的设备信息。
 // 失败只返回 error，由调用方决定是否记日志——回发不应该影响发现主循环。
+//
+// 请求体必须用 shared.RegisterRequest 而不是 shared.Message：后者是 UDP 多播
+// 公告的载荷，带着 announce: true，而协议 3.1 的 register 请求体没有这个字段。
 func postRegister(peer registerPeer) error {
-	payload, err := json.Marshal(shared.Message)
+	payload, err := json.Marshal(shared.RegisterRequest())
 	if err != nil {
 		return fmt.Errorf("marshal register body: %w", err)
 	}

@@ -45,11 +45,3 @@ func TestFingerprintDiffersPerProcess(t *testing.T) {
 		t.Fatalf("two independent fingerprints are identical: %q", a)
 	}
 }
-
-// TestAnnounceNotSentInRegisterBody 公告里不再携带 announce：
-// 它是多播公告专用字段，register 的请求/响应体都没有它。
-func TestAnnounceNotSentInRegisterBody(t *testing.T) {
-	if Message.Announce {
-		t.Fatal("Message.Announce must stay false: announce is multicast-only")
-	}
-}

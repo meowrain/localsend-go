@@ -1,7 +1,15 @@
 package discovery
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -219,4 +227,73 @@ func TestPostbackRegisterDefaultDoesNotPanic(t *testing.T) {
 	peer := registerPeer{IP: "127.0.0.1", Port: 1, Protocol: "http"}
 	// 不断言错误内容：不同平台对 connection refused 的文案不一致。
 	_ = postRegister(peer)
+}
+
+// TestPostRegisterBodyOmitsAnnounce 抓一次真实的 HTTP 回发，检查请求体：
+// 必须带完整设备信息（含 version / port / protocol），且不带 announce。
+// 协议 3.1 / 3.2 的 register 请求体没有 announce；早先为了「让请求体干净」
+// 而把 shared.Message.Announce 改成 false，顺手把 UDP 公告也弄哑了——
+// 这里锁住请求体侧的正确形态，公告侧由 shared.TestAnnouncementJSONSetsAnnounceTrue 锁住。
+func TestPostRegisterBodyOmitsAnnounce(t *testing.T) {
+	withLocalMessage(t, models.BroadcastMessage{
+		Alias:       "npc-go",
+		Version:     shared.ProtocolVersion,
+		DeviceModel: "Linux",
+		DeviceType:  "headless",
+		Fingerprint: "fp-self",
+		Port:        53317,
+		Protocol:    "http",
+		Download:    false,
+		Announce:    true, // 公告必须是 true，回发请求体仍不该带它
+	})
+
+	var (
+		mu     sync.Mutex
+		bodies [][]byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != registerPath {
+			t.Errorf("path = %q, want %q", r.URL.Path, registerPath)
+		}
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"alias":"peer","version":"2.2","fingerprint":"fp-peer"}`))
+	}))
+	defer srv.Close()
+
+	host, portStr, err := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	if err != nil {
+		t.Fatalf("split server addr: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parse server port: %v", err)
+	}
+
+	if err := postRegister(registerPeer{IP: host, Port: port, Protocol: "http"}); err != nil {
+		t.Fatalf("postRegister: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 1 {
+		t.Fatalf("server received %d requests, want 1", len(bodies))
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal(bodies[0], &fields); err != nil {
+		t.Fatalf("unmarshal register body %q: %v", bodies[0], err)
+	}
+	if _, ok := fields["announce"]; ok {
+		t.Fatalf("register body must not carry announce: %s", bodies[0])
+	}
+	for _, key := range []string{"alias", "version", "deviceModel", "deviceType", "fingerprint", "port", "protocol", "download"} {
+		if _, ok := fields[key]; !ok {
+			t.Errorf("register body missing %q: %s", key, bodies[0])
+		}
+	}
 }
