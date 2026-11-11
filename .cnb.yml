@@ -63,7 +63,21 @@
 
 .go-build-all: &go-build-all
   name: 构建全平台产物
-  script: make build PROJECT_NAME=localsend-go
+  script: |
+    # Tag 发版时把 Tag 名注入二进制；普通分支交给 Makefile（git 不可用时回退 dev）。
+    # 不用 git 取提交哈希：流水线容器里 git 会因 dubious ownership 直接失败
+    # （这正是上面 GOFLAGS=-buildvcs=false 的原因），CNB 已注入可靠的内置变量。
+    set -e
+    # 显式传空值会覆盖 Makefile 的 ?= 默认值，所以只在变量非空时才追加参数
+    ARGS="PROJECT_NAME=localsend-go"
+    if [ -n "${CNB_COMMIT_SHORT:-}" ]; then
+      ARGS="$ARGS COMMIT=$CNB_COMMIT_SHORT"
+    fi
+    if [ "${CNB_IS_TAG:-false}" = "true" ]; then
+      ARGS="$ARGS VERSION=$CNB_BRANCH"
+    fi
+    # shellcheck disable=SC2086  # 需要按空格拆成多个 make 变量
+    make build $ARGS
 
 # 仅 v* 形式的 Tag 才执行发布相关任务
 .only-release-tag: &only-release-tag

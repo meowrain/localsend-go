@@ -64,7 +64,11 @@ jobs:
           GOARCH: ${{ steps.platform.outputs.GOARCH }}
         run: |
           mkdir -p ./artifacts
-          go build -o "./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" .
+          VERSION="${GITHUB_REF_NAME}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          go build \
+            -ldflags "-X github.com/meowrain/localsend-go/internal/version.Version=${VERSION} -X github.com/meowrain/localsend-go/internal/version.Commit=${COMMIT}" \
+            -o "./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" .
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
