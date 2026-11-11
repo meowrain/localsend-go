@@ -1,14 +1,191 @@
 # CNB 云原生构建配置
-# 文档：https://docs.cnb.cool/zh/build/npc.html
+# 文档：https://docs.cnb.cool/zh/build/configuration.md
 #
-# 这里只声明 NPC 事件流水线：在 Issue / PR 评论中 @仓库路径(角色名) 时触发。
-# 角色（人设、标语、提示词）定义在 .cnb/settings.yml 的 npc.roles 中。
+# 包含四类流水线：
+#   1. pull_request —— PR 检查（格式 / 静态检查 / 单测 / 覆盖率上报）
+#   2. main push    —— 同样的检查 + 全平台交叉编译，产物归档为 commit 附件
+#   3. tag_push     —— 检查 + 构建 + 打 deb 包 + 生成 changelog + 发布 Release 并上传附件
+#   4. NPC 事件      —— Issue / PR 评论中 @仓库路径(角色名) 时触发
+#                      角色（人设、标语、提示词）定义在 .cnb/settings.yml 的 npc.roles 中
 #
 # 使用默认镜像 cnbcool/default-npc:latest，其中已内置 npc:go 运行所需环境。
-# 若后续需要预装 Go 工具链、加速依赖下载，可按文档构建自定义镜像，
-# 并把 image 换成 ${CNB_DOCKER_REGISTRY}/${CNB_NPC_SLUG_LOWERCASE}:latest。
+
+# ══ 可复用片段（"." 开头的 key 不会被识别为分支名） ══════════════════
+
+# Go 构建环境：模块缓存与编译缓存挂载为数据卷，跨流水线复用
+.docker: &docker
+  image: golang:1.22
+  volumes:
+    - /go/pkg/mod
+    - /root/.cache/go-build
+
+# -buildvcs=false：容器内 git 目录归属不同，关闭 VCS 打标避免构建失败
+.go-env: &go-env
+  GOFLAGS: -buildvcs=false
+  GOPROXY: https://goproxy.cn,direct
+  CGO_ENABLED: "0"
+
+# ── 代码检查步骤（逐个可用，便于按场景组合） ──────────────────────
+
+.go-fmt: &go-fmt
+  name: 格式检查
+  script: |
+    unformatted=$(gofmt -l .)
+    if [ -n "$unformatted" ]; then
+      echo "以下文件未通过 gofmt 检查："
+      echo "$unformatted"
+      echo "请执行 gofmt -w . 后重新提交"
+      exit 1
+    fi
+
+.go-vet: &go-vet
+  name: 静态检查
+  script: go vet ./...
+
+.go-test: &go-test
+  name: 单元测试
+  script: go test -covermode=atomic -coverprofile=coverage.out ./...
+
+.go-coverage: &go-coverage
+  name: 上报覆盖率
+  type: testing:coverage
+  options:
+    pattern: coverage.out
+    lang: go
+    # 项目暂无覆盖率门禁，仅上报数据供洞察页查看
+    breakIfNoCoverage: false
+
+# ── 构建步骤 ────────────────────────────────────────────────────
+
+.go-mod-download: &go-mod-download
+  name: 下载依赖
+  script: go mod download
+
+.go-build-all: &go-build-all
+  name: 构建全平台产物
+  script: make build PROJECT_NAME=localsend-go
+
+# 仅 v* 形式的 Tag 才执行发布相关任务
+.only-release-tag: &only-release-tag
+  if: |
+    case "$CNB_BRANCH" in
+      v*) exit 0 ;;
+      *) echo "非 v* 发版 Tag，跳过此任务"; exit 1 ;;
+    esac
+
+# 构建 Linux deb 安装包（amd64 / arm64）
+.go-build-deb: &go-build-deb
+  <<: *only-release-tag
+  name: 构建 deb 安装包
+  script: |
+    set -e
+    VERSION="${CNB_BRANCH#v}"
+    for arch in amd64 arm64; do
+      cp "bin/localsend-go-linux-$arch" debian/usr/local/bin/localsend-cli
+      chmod 755 debian/usr/local/bin/localsend-cli debian/DEBIAN/postinst
+      sed -i "s/^Version: .*/Version: $VERSION/" debian/DEBIAN/control
+      sed -i "s/^Architecture: .*/Architecture: $arch/" debian/DEBIAN/control
+      dpkg-deb --build --root-owner-group debian "localsend-cli_${VERSION}_${arch}.deb"
+    done
+    ls -lh ./*.deb
+
+# ══ PR 检查 ════════════════════════════════════════════════════
+
+"**":
+  pull_request:
+    - name: pr-check
+      docker: *docker
+      env: *go-env
+      stages:
+        - *go-mod-download
+        - *go-fmt
+        - *go-vet
+        - *go-test
+        - *go-coverage
+
+# ══ main 分支推送：检查 + 构建 + 归档产物 ════════════════════════
+
+main:
+  push:
+    - name: build-and-archive
+      docker: *docker
+      env: *go-env
+      stages:
+        - *go-mod-download
+        - *go-fmt
+        - *go-vet
+        - *go-test
+        - *go-coverage
+        - *go-build-all
+        - name: 归档构建产物到 Commit 附件
+          image: cnbcool/attachments:latest
+          settings:
+            type: UPLOAD
+            attachments:
+              - "bin/*"
+
+# ══ Tag 发版 ═══════════════════════════════════════════════════
 
 $:
+  tag_push:
+    - name: release
+      docker: *docker
+      env: *go-env
+      stages:
+        - *go-mod-download
+        - *go-fmt
+        - *go-vet
+        - *go-test
+        - *go-build-all
+        - *go-build-deb
+        - <<: *only-release-tag
+          name: 生成 changelog
+          image: cnbcool/changelog
+          settings:
+            latestChangeLogTarget: LATEST_CHANGELOG.md
+          # 首个 Tag 无历史版本可对比，允许失败
+          allowFailure: true
+        - <<: *only-release-tag
+          name: 准备 Release 描述
+          script: |
+            # 首个 Tag 或两 Tag 间无符合条件的提交时，changelog 文件不存在
+            if [ ! -s LATEST_CHANGELOG.md ]; then
+              echo "Release $CNB_BRANCH" > LATEST_CHANGELOG.md
+            fi
+        - <<: *only-release-tag
+          name: 发布 Release
+          type: git:release
+          options:
+            title: localsend-go $CNB_BRANCH
+            descriptionFromFile: LATEST_CHANGELOG.md
+        - <<: *only-release-tag
+          name: 上传发布附件
+          image: cnbcool/attachments:latest
+          settings:
+            type: UPLOAD
+            attachments:
+              - "./bin/*"
+              - "./*.deb"
+
+  # 页面手动触发构建（按钮定义在 .cnb/web_trigger.yml）
+  web_trigger_build:
+    - name: manual-build
+      docker: *docker
+      env: *go-env
+      stages:
+        - *go-mod-download
+        - *go-fmt
+        - *go-vet
+        - *go-test
+        - *go-build-all
+        - name: 归档构建产物到 Commit 附件
+          image: cnbcool/attachments:latest
+          settings:
+            type: UPLOAD
+            attachments:
+              - "bin/*"
+
+  # ── NPC：Issue / PR 评论中 @仓库路径(角色名) 时触发 ──────────────
   issue.comment@npc:
     - docker:
         image: cnbcool/default-npc:latest

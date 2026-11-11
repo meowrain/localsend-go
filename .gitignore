@@ -1,2 +1,7 @@
 bin/
 !debian/usr/local/bin/
+
+# 构建 / 测试产物
+coverage.out
+*.deb
+LATEST_CHANGELOG.md

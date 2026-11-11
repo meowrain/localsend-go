@@ -1,0 +1,10 @@
+# CNB 手动触发按钮配置
+# 文档：https://docs.cnb.cool/zh/build/web-trigger.md
+#
+# 按钮出现在「代码-分支详情页」，点击后触发 .cnb.yml 中对应 web_trigger_* 事件。
+
+branch:
+  - buttons:
+      - name: 构建全平台产物
+        description: 编译 Linux / macOS / Windows 全平台二进制，并归档为当前 Commit 附件
+        event: web_trigger_build
