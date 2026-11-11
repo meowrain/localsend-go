@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -801,11 +802,13 @@ func TestUploadTokenReplayRejected(t *testing.T) {
 		t.Fatalf("first upload status = %d, want 200", got)
 	}
 
-	// 第二次、第三次重放：都必须被拒
+	// 第二次、第三次重放：都必须被拒。
+	// 回 403（官方 invalid_token_error）而不是 409：token 重放不是「别的会话占了通道」，
+	// 发送端等多久都不会通，409 会把它引到错误的处理分支。
 	for i := 2; i <= 3; i++ {
 		got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], []byte("overwrite!"))
-		if got != http.StatusConflict {
-			t.Fatalf("replay #%d status = %d, want 409", i, got)
+		if got != http.StatusForbidden {
+			t.Fatalf("replay #%d status = %d, want 403", i, got)
 		}
 	}
 
@@ -854,5 +857,306 @@ func TestUploadTokenReplayRejectedSamePeer(t *testing.T) {
 	stored, err := os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
 	if err != nil || !bytes.Equal(stored, content) {
 		t.Fatalf("stored file changed: %q, err = %v", stored, err)
+	}
+}
+
+// concurrentUpload 让 N 个请求同时上传同一个 fileId 的同一份内容，
+// 返回每个请求的状态码，并断言只有一个 200、落盘内容正确。
+//
+// 并发点用 barrier 对齐：所有 goroutine 都准备好才一起放行，
+// 这样才可能真的撞上 beginUpload 的判锁窗口（串行跑永远不会撞）。
+func concurrentUpload(t *testing.T, srv *httptest.Server, sessionID, fileID, token string, content []byte, n int) []int {
+	t.Helper()
+
+	codes := make([]int, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			q := url.Values{}
+			q.Set("sessionId", sessionID)
+			q.Set("fileId", fileID)
+			q.Set("token", token)
+			resp, err := http.Post(srv.URL+"/api/localsend/v2/upload?"+q.Encode(),
+				"application/octet-stream", bytes.NewReader(content))
+			if err != nil {
+				t.Errorf("upload %d: %v", i, err)
+				codes[i] = -1
+				return
+			}
+			defer resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			codes[i] = resp.StatusCode
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	return codes
+}
+
+// countStatus 统计某个状态码出现的次数。
+func countStatus(codes []int, want int) int {
+	n := 0
+	for _, c := range codes {
+		if c == want {
+			n++
+		}
+	}
+	return n
+}
+
+// TestConcurrentUploadSameFileOnlyOneWins 同一 fileId 的 N 个并发上传，只能有 1 个 200。
+//
+// 这是「4 个并发请求全部 200」那个阻断问题的回归测试：beginUpload 必须在会话锁内
+// 检查并置位 inProgress，否则每个请求都能通过校验、各自 rename 同一个目标文件，
+// 最后收尾时互相覆盖终态——已经把正确内容落盘的文件会被记成 failed=true，
+// 而 failed=true 正是「允许重传」的信号，token 重放防护就此打开。
+func TestConcurrentUploadSameFileOnlyOneWins(t *testing.T) {
+	workDir := isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const (
+		fileName = "same.bin"
+		n        = 8
+	)
+	content := bytes.Repeat([]byte("payload-"), 4096) // 足够大，让并发窗口真实存在
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(content)), SHA256: sha256Hex(content)},
+	})
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+
+	codes := concurrentUpload(t, srv, resp.SessionID, fileName, resp.Files[fileName], content, n)
+
+	if got := countStatus(codes, http.StatusOK); got != 1 {
+		t.Fatalf("got %d success responses, want exactly 1 (codes = %v)", got, codes)
+	}
+	// 落败的请求必须被明确拒绝：403 invalid token（「这个 token 现在不归你」）
+	if got := countStatus(codes, http.StatusForbidden); got != n-1 {
+		t.Fatalf("got %d rejected responses, want %d (codes = %v)", got, n-1, codes)
+	}
+
+	// 落盘内容必须是完整的正确内容
+	stored, err := os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
+	if err != nil {
+		t.Fatalf("read stored file: %v", err)
+	}
+	if !bytes.Equal(stored, content) {
+		t.Fatalf("stored content corrupted: len = %d, want %d", len(stored), len(content))
+	}
+
+	// 关键断言：成功落盘的文件必须是「成功终态」，不能被并发请求改写成 failed。
+	// failed=true 意味着允许重传，token 重放防护就失效了。
+	snap, ok := store.lookup(resp.SessionID)
+	if !ok {
+		t.Fatalf("session %s disappeared", resp.SessionID)
+	}
+	f := snap.files[fileName]
+	if !f.done {
+		t.Fatalf("file %s not in terminal state: %+v", fileName, f)
+	}
+	if f.failed {
+		t.Fatalf("successfully stored file marked failed=true (replay protection broken): %+v", f)
+	}
+	if f.inProgress {
+		t.Fatalf("file %s still marked inProgress after all requests returned", fileName)
+	}
+
+	// 最终校验：拿旧 token 再传一次必须被拒，且不覆盖已落盘的文件
+	if got := postUpload(t, srv.URL, resp.SessionID, fileName, resp.Files[fileName], []byte("overwrite!")); got != http.StatusForbidden {
+		t.Fatalf("replay after concurrent uploads status = %d, want 403", got)
+	}
+	stored, err = os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
+	if err != nil || !bytes.Equal(stored, content) {
+		t.Fatalf("replay overwrote the file: err = %v", err)
+	}
+}
+
+// TestConcurrentUploadSameFileMixedContent 并发上传里混入错误内容（sha256 不匹配）：
+// 无论谁先抢到，最终终态必须与磁盘上的事实一致——
+// 落盘成功就不能被标 failed，落盘失败才允许重传。
+func TestConcurrentUploadSameFileMixedContent(t *testing.T) {
+	workDir := isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	const fileName = "mixed.bin"
+	good := bytes.Repeat([]byte("good"), 8192)
+	bad := bytes.Repeat([]byte("bad!"), 8192) // 等长但内容不同，必然 422
+	req := prepareRequest(map[string]models.FileInfo{
+		fileName: {ID: fileName, FileName: fileName, Size: int64(len(good)), SHA256: sha256Hex(good)},
+	})
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+
+	const n = 6
+	codes := make([]int, n)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			payload := good
+			if i%2 == 1 {
+				payload = bad
+			}
+			<-start
+			q := url.Values{}
+			q.Set("sessionId", resp.SessionID)
+			q.Set("fileId", fileName)
+			q.Set("token", resp.Files[fileName])
+			r, err := http.Post(srv.URL+"/api/localsend/v2/upload?"+q.Encode(),
+				"application/octet-stream", bytes.NewReader(payload))
+			if err != nil {
+				t.Errorf("upload %d: %v", i, err)
+				codes[i] = -1
+				return
+			}
+			defer r.Body.Close()
+			_, _ = io.Copy(io.Discard, r.Body)
+			codes[i] = r.StatusCode
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	// 至少一个能过关，且不可能有两个以上：抢占是互斥的
+	if ok := countStatus(codes, http.StatusOK); ok > 1 {
+		t.Fatalf("got %d success responses, want at most 1 (codes = %v)", ok, codes)
+	}
+
+	snap, exists := store.lookup(resp.SessionID)
+	var f receiveFile
+	if exists {
+		f = snap.files[fileName]
+	}
+	stored, statErr := os.ReadFile(filepath.Join(workDir, uploadBaseDir, fileName))
+	onDisk := statErr == nil && bytes.Equal(stored, good)
+
+	if onDisk {
+		// 正确内容已经落盘：文件必须是成功终态，不能被失败的并发请求污染
+		if f.failed {
+			t.Fatalf("file on disk but session marks failed=true (codes = %v): %+v", codes, f)
+		}
+		if !f.done {
+			t.Fatalf("file on disk but not in terminal state (codes = %v): %+v", codes, f)
+		}
+		return
+	}
+	// 没落盘：可以是失败终态（允许重传），但绝不能是「成功」
+	if _, err := os.Stat(filepath.Join(workDir, uploadBaseDir, fileName)); err == nil {
+		t.Fatalf("uploads/ has %s but content is not the expected payload", fileName)
+	}
+	if f.done && !f.failed {
+		t.Fatalf("file never landed but is marked as successful (codes = %v): %+v", codes, f)
+	}
+}
+
+// TestFileFailureDoesNotKillSession 单个文件失败不能连坐整个会话。
+//
+// 官方语义是「单个文件 Failed、会话在所有文件都不再 Pending 时才释放」。
+// 多文件传输里第一个文件 422 就把会话作废，会让后续文件全部 403——
+// 发送端只能整轮重来。这里断言：第一个文件 422 之后，第二个文件仍然可以传成功。
+func TestFileFailureDoesNotKillSession(t *testing.T) {
+	isolation(t, "")
+	srv := startReceiverV22(t)
+	withPIN(t, "")
+
+	first := []byte("first content")
+	second := []byte("second content")
+	req := prepareRequest(map[string]models.FileInfo{
+		"a.txt": {ID: "a.txt", FileName: "a.txt", Size: int64(len(first)), SHA256: sha256Hex(first)},
+		"b.txt": {ID: "b.txt", FileName: "b.txt", Size: int64(len(second)), SHA256: sha256Hex(second)},
+	})
+	code, body := postPrepare(t, srv.URL, "", req)
+	if code != http.StatusOK {
+		t.Fatalf("prepare status = %d, want 200 (body %q)", code, body)
+	}
+	var resp models.PrepareReceiveResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode prepare: %v", err)
+	}
+
+	// 第一个文件：校验和不匹配 → 422
+	tampered := append([]byte(nil), first...)
+	tampered[0] ^= 0xFF
+	if got := postUpload(t, srv.URL, resp.SessionID, "a.txt", resp.Files["a.txt"], tampered); got != statusChecksumMismatch {
+		t.Fatalf("tampered upload status = %d, want 422", got)
+	}
+
+	// 会话不该因为一个文件失败就结束：还有 Pending 的文件
+	if active := store.activeSession(); active == nil {
+		t.Fatal("session released after a single file failed; other files would be rejected with 403")
+	}
+
+	// 第二个文件必须还能传成功
+	if got := postUpload(t, srv.URL, resp.SessionID, "b.txt", resp.Files["b.txt"], second); got != http.StatusOK {
+		t.Fatalf("second file upload status = %d, want 200 (session killed by first file's failure)", got)
+	}
+
+	// 所有文件都离开 Pending 之后，会话才算结束
+	if active := store.activeSession(); active != nil {
+		t.Fatalf("session %s still blocks transfers after all files finished", active.id)
+	}
+}
+
+// TestFailFileKeepsSessionUntilComplete 直接验证会话状态位：
+// failFile 只标文件，会话是否释放只看「还有没有 Pending 的文件」。
+func TestFailFileKeepsSessionUntilComplete(t *testing.T) {
+	store.reset()
+	t.Cleanup(store.reset)
+
+	sess := &receiveSession{
+		id:      "s1",
+		created: time.Now(),
+		files: map[string]*receiveFile{
+			"a": {name: "a.txt", token: "t", inProgress: true},
+			"b": {name: "b.txt", token: "t"},
+		},
+	}
+	store.add(sess)
+
+	store.mu.Lock()
+	failFileLocked(sess, "a")
+	ended := sess.ended
+	inProgress := sess.files["a"].inProgress
+	store.mu.Unlock()
+
+	if ended {
+		t.Fatal("session must stay open while another file is still Pending")
+	}
+	if inProgress {
+		t.Fatal("failed file must leave inProgress, otherwise it can never be uploaded again")
+	}
+	if active := store.activeSession(); active == nil || active.id != "s1" {
+		t.Fatal("session must remain the active one")
+	}
+
+	store.mu.Lock()
+	finishFileLocked(sess, "b")
+	ended = sess.ended
+	store.mu.Unlock()
+	if !ended {
+		t.Fatal("session must end once every file left Pending")
+	}
+	if active := store.activeSession(); active != nil {
+		t.Fatalf("session %s still active after completion", active.id)
 	}
 }
