@@ -37,14 +37,14 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 			wg.Add(1)
 			go func(ip string) {
 				defer wg.Done()
-				url := fmt.Sprintf("https://%s:%d/api/localsend/v2/register", ip, broadcastPort)
-				req, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-				if err != nil {
-					logger.Errorf("Failed to create HTTP request for %s: %v", ip, err)
-					return
-				}
-				req.Header.Set("Content-Type", "application/json")
 
+				// 探测目标地址：先按本机使用的协议（本项目默认 http）试，失败再退回 https。
+				// 之前写死 https://<ip>:53317，导致明文 http 的对端（例如另一个 localsend-go）
+				// 在多播不可用的网络里完全发现不到。
+				schemes := []string{shared.Message.Protocol, "https"}
+				if schemes[0] == "" || schemes[0] == "https" {
+					schemes = []string{"https"}
+				}
 				client := &http.Client{
 					Timeout: httpTimeout,
 					Transport: &http.Transport{
@@ -52,7 +52,21 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 					},
 				}
 
-				resp, err := client.Do(req)
+				var resp *http.Response
+				var err error
+				for _, scheme := range schemes {
+					url := fmt.Sprintf("%s://%s:%d/api/localsend/v2/register", scheme, ip, broadcastPort)
+					req, reqErr := http.NewRequest("POST", url, bytes.NewBuffer(data))
+					if reqErr != nil {
+						logger.Errorf("Failed to create HTTP request for %s: %v", ip, reqErr)
+						return
+					}
+					req.Header.Set("Content-Type", "application/json")
+					resp, err = client.Do(req)
+					if err == nil {
+						break
+					}
+				}
 				if err != nil {
 					return
 				}
@@ -86,6 +100,8 @@ func ListenForHttpBroadCast(updates chan<- []models.SendModel) {
 			devices = append(devices, models.SendModel{
 				IP:         ip,
 				DeviceName: device.Alias,
+				Port:       device.Port,
+				Protocol:   device.Protocol,
 			})
 		}
 		shared.DevicesMutex.RUnlock()

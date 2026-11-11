@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,8 +10,18 @@ import (
 	bubbletea "github.com/charmbracelet/bubbletea"
 )
 
-// selectDevice 使用 Bubble Tea 库显示可供选择的设备列表并等待用户选择
+// SelectDevice 使用 Bubble Tea 库显示可供选择的设备列表并等待用户选择
 func SelectDevice(updates <-chan []models.SendModel) (string, error) {
+	device, err := SelectDeviceInfo(updates)
+	if err != nil {
+		return "", err
+	}
+	return device.IP, nil
+}
+
+// SelectDeviceInfo 与 SelectDevice 行为一致，但返回完整的设备信息（含 Port/Protocol），
+// 供发送链路按对端广播的协议与端口发起请求。
+func SelectDeviceInfo(updates <-chan []models.SendModel) (models.SendModel, error) {
 	// 创建一个带缓冲的内部 channel
 	internalUpdates := make(chan []models.SendModel, 100)
 
@@ -43,13 +54,15 @@ func SelectDevice(updates <-chan []models.SendModel) (string, error) {
 	cmd := bubbletea.NewProgram(initModel)
 	m, err := cmd.Run()
 	if err != nil {
-		return "", err
+		return models.SendModel{}, err
 	}
 
 	if m, ok := m.(model); ok && len(m.devices) > 0 {
-		return m.devices[m.cursor].IP, nil
+		return m.devices[m.cursor], nil
 	}
-	return "", nil
+	// 不能让调用方拿到零值设备：那样会拼出 https://:53317 这种地址，
+	// 用户最终看到的是 "connection refused"，与「没有选中设备」毫无关系。
+	return models.SendModel{}, errors.New("no device selected")
 }
 
 // model 结构体用于 Bubble Tea

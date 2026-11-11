@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/meowrain/localsend-go/internal/config"
 	"github.com/meowrain/localsend-go/internal/discovery"
+	"github.com/meowrain/localsend-go/internal/discovery/shared"
 	"github.com/meowrain/localsend-go/internal/handlers"
 	"github.com/meowrain/localsend-go/internal/pkg/server"
 	"github.com/meowrain/localsend-go/internal/utils/logger"
@@ -317,7 +318,7 @@ func WebServerMode(httpServer *http.ServeMux, port int) {
 		logger.Errorf("Failed to create uploads directory: %v", err)
 		return
 	}
-	if config.ConfigData.Functions.HttpFileServer {
+	if config.ConfigData.HttpFileServerEnabled() {
 		httpServer.HandleFunc("/", handlers.IndexFileHandler)
 		httpServer.HandleFunc("/uploads/", handlers.FileServerHandler)
 		httpServer.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
@@ -363,64 +364,108 @@ func SendMode(filePath string) {
 	}
 }
 
+// SendTextMode 把文本封装成虚拟 .txt 文件发送，复用 SendFile 的 prepare/upload 流程。
+func SendTextMode(text string) {
+	err := handlers.SendText(text)
+	if err != nil {
+		logger.Errorf("Send failed: %v", err)
+	}
+}
+
+// runSendCommand 统一处理 `send` 子命令的参数解析、校验与分发。
+func runSendCommand(args []string) {
+	opts, err := parseSendOptions(args, os.Stderr)
+	if err != nil {
+		if err == flag.ErrHelp {
+			ExitMode()
+		}
+		fmt.Fprintf(os.Stderr, "send: %v\n", err)
+		sendUsage()
+		os.Exit(1)
+	}
+
+	text, isText, err := opts.resolve(readClipboard)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "send: %v\n", err)
+		sendUsage()
+		os.Exit(1)
+	}
+
+	if isText {
+		SendTextMode(text)
+		return
+	}
+	SendMode(opts.FilePath)
+}
+
+// sendUsage 打印 send 子命令的用法。
+func sendUsage() {
+	fmt.Fprintln(os.Stderr, "Usage: localsend-go send <file_path>")
+	fmt.Fprintln(os.Stderr, "       localsend-go send --text \"<content>\"")
+	fmt.Fprintln(os.Stderr, "       localsend-go send --clipboard")
+}
+
+// showHelp 打印全局帮助信息。
+func showHelp() {
+	fmt.Println("Usage: <command> [arguments]")
+	fmt.Println("Commands:")
+	fmt.Println("  web                 Start Web mode")
+	fmt.Println("  send <file_path>    Send a file or directory")
+	fmt.Println("  send --text <text>  Send a piece of text (as a virtual .txt file)")
+	fmt.Println("  send --clipboard    Send local clipboard content as text")
+	fmt.Println("  receive             Start Receive mode")
+	fmt.Println("  help                Display this help information")
+	fmt.Println("Options:")
+	fmt.Println("  --help              Display this help information")
+	fmt.Println("  --port=<number>     Specify server port (default: 53317)")
+	fmt.Println("  --config=<path>     Specify config file path (default: ./config.yaml)")
+	fmt.Println("")
+	fmt.Println("Config lookup order: --config/LOCALSEND_CONFIG > ./config.yaml >")
+	fmt.Println("  user config dir (e.g. ~/.config/localsend-go/config.yaml) >")
+	fmt.Println("  legacy internal/config/config.yaml > embedded defaults")
+	fmt.Println("Notes:")
+	fmt.Println("  send 的 <file_path>、--text、--clipboard 三者互斥，同时给出会报错退出")
+}
+
 func ExitMode() {
 	fmt.Println("Exiting program...")
 	os.Exit(0)
 }
 
 func flagParse(httpServer *http.ServeMux, port int, flagOpen *bool) {
-	showHelp := func() {
-		fmt.Println("Usage: <command> [arguments]")
-		fmt.Println("Commands:")
-		fmt.Println("  web                 Start Web mode")
-		fmt.Println("  send <file_path>    Start Send mode (file path required)")
-		fmt.Println("  receive             Start Receive mode")
-		fmt.Println("  help                Display this help information")
-		fmt.Println("Options:")
-		fmt.Println("  --help              Display this help information")
-		fmt.Println("  --port=<number>     Specify server port (default: 53317)")
-	}
-	flag.Usage = showHelp
-	// 解析标准flag参数
-	flag.Parse()
-
-	// 检查是否有 --help 参数
-	for _, arg := range os.Args {
-		if arg == "--help" || arg == "-h" {
-			showHelp()
-			ExitMode()
-		}
-	}
-
-	if len(os.Args) > 1 {
+	// 只取第一个非 flag 参数作为模式，允许 `localsend-go --port 53318 web` 这样的写法
+	args := flag.Args()
+	if len(args) > 0 {
 		*flagOpen = true
-		mode := os.Args[1]
+		mode := args[0]
 
 		switch mode {
 		case "web":
 			WebServerMode(httpServer, port)
 		case "send":
-			filePath := ""
-			if len(os.Args) > 2 {
-				filePath = os.Args[2]
-				SendMode(filePath)
-			} else {
-				logger.Error("Need file path")
-				ExitMode()
-			}
+			// 用 flag.Args() 的子切片，兼容 `localsend-go --port 53318 send ...` 这种写法
+			runSendCommand(args[1:])
 		case "receive":
 			ReceiveMode()
 		case "help":
 			showHelp()
 			ExitMode()
+		default:
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", mode)
+			showHelp()
+			os.Exit(1)
 		}
 	}
 }
 
-var port int
+var (
+	port       int
+	configPath string
+)
 
 func init() {
 	flag.IntVar(&port, "port", 53317, "Port to listen on")
+	flag.StringVar(&configPath, "config", "", "Path to config file")
 }
 
 func main() {
@@ -434,11 +479,31 @@ func main() {
 	}()
 	logger.InitLogger()
 
+	// 先解析命令行参数：--config 与 --port 都必须早于配置加载与监听端口绑定。
+	// 之前 flag.Parse() 放在 flagParse() 里，导致 --config 读到的是零值、
+	// --port 也无法影响已经启动的监听，二者实际都不生效。
+	flag.Usage = showHelp
+	flag.Parse()
+	for _, arg := range os.Args {
+		if arg == "--help" || arg == "-h" {
+			showHelp()
+			ExitMode()
+		}
+	}
+
+	// 显式指定的配置文件优先级最高，必须在读取 config.ConfigData 之前设置
+	config.SetPath(configPath)
+	// 提前加载配置，方便在启动日志里提示实际使用的配置文件
+	config.Load()
+	// 配置就绪后再同步广播消息里的设备名与监听端口
+	shared.SyncFromConfig()
+	shared.SetListenPort(port)
+
 	// Start HTTP server
 	httpServer := server.New()
 
 	/* Send and receive section */
-	if config.ConfigData.Functions.LocalSendServer {
+	if config.ConfigData.LocalSendServerEnabled() {
 		httpServer.HandleFunc("/api/localsend/v2/prepare-upload", handlers.PrepareReceive)
 		httpServer.HandleFunc("/api/localsend/v2/upload", handlers.ReceiveHandler)
 		httpServer.HandleFunc("/api/localsend/v2/info", handlers.GetInfoHandler)
