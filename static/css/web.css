@@ -633,6 +633,14 @@ body.marquee-active {
 .file-list[data-view="large"] .file-actions,
 .file-list[data-view="medium"] .file-actions,
 .file-list[data-view="small"] .file-actions,
+.file-list[data-view="list"] .file-actions,
+.file-list[data-view="tiles"] .file-actions,
+.file-list[data-view="content"] .file-actions { display: none; }
+
+.file-list[data-view="xlarge"] .file-actions,
+.file-list[data-view="large"] .file-actions,
+.file-list[data-view="medium"] .file-actions,
+.file-list[data-view="small"] .file-actions,
 .file-list[data-view="list"] .file-actions {
   position: absolute;
   top: 8px;
