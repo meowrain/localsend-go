@@ -236,34 +236,228 @@
   });
 
   // ---------- 主题 ----------
+  //
+  // 状态分两段：主题名（THEMES）+ 明暗（light / dark / system）。
+  // 解析后的明暗写在 <html data-mode>，主题名写在 <html data-theme>，
+  // CSS 只按这 12 种组合取变量，不依赖 prefers-color-scheme 媒体查询。
+  // 存储格式：'forest:dark'；兼容老值 'light' / 'dark'（等价于 indigo 主题 + 对应明暗）。
 
   var THEME_KEY = 'localsendgo-theme';
-  function applyTheme(theme) {
-    if (theme === 'dark' || theme === 'light') {
-      document.documentElement.setAttribute('data-theme', theme);
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
+  var DEFAULT_THEME = 'indigo';
+  // 色点用「主题主色 / 主题底色」两个色块拼出来，避免为每套主题再加图标
+  var THEMES = [
+    { id: 'indigo', name: '靛蓝', hint: '默认', dot: '#4f46e5', dotBg: '#eef2f9' },
+    { id: 'forest', name: '森林', hint: '沉稳', dot: '#166534', dotBg: '#e8f0ea' },
+    { id: 'ember', name: '暖橙', hint: '温暖', dot: '#b23c0a', dotBg: '#f5ebdf' },
+    { id: 'tide', name: '海盐青', hint: '清爽', dot: '#0f766e', dotBg: '#e3eff1' },
+    { id: 'rose', name: '玫瑰', hint: '柔和', dot: '#be123c', dotBg: '#f8e7ec' },
+    { id: 'synth', name: '赛博紫', hint: '锐利', dot: '#6d28d9', dotBg: '#efe7fd' }
+  ];
+  var MODES = ['light', 'dark', 'system'];
+
+  function has(list, v) {
+    for (var i = 0; i < list.length; i++) if (list[i] === v) return true;
+    return false;
   }
+
+  function themeId(v) {
+    for (var i = 0; i < THEMES.length; i++) if (THEMES[i].id === v) return v;
+    return DEFAULT_THEME;
+  }
+
+  function normalizeMode(v) {
+    return has(MODES, v) ? v : 'system';
+  }
+
+  // state 从 localStorage 读出「主题名 + 明暗」，老值在这里平滑迁移
+  function readPref() {
+    var raw = null;
+    try { raw = localStorage.getItem(THEME_KEY); } catch (e) { raw = null; }
+    if (!raw) return { theme: DEFAULT_THEME, mode: 'system' };
+    if (raw === 'light' || raw === 'dark') return { theme: DEFAULT_THEME, mode: raw };
+    var i = raw.indexOf(':');
+    if (i <= 0) return { theme: DEFAULT_THEME, mode: 'system' };
+    return { theme: themeId(raw.slice(0, i)), mode: normalizeMode(raw.slice(i + 1)) };
+  }
+
+  function savePref(pref) {
+    try { localStorage.setItem(THEME_KEY, pref.theme + ':' + pref.mode); } catch (e) { /* 隐私模式忽略 */ }
+  }
+
+  function systemDark() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+
+  // resolveMode 把 'system' 解析成实际明暗
+  function resolveMode(mode) {
+    if (mode === 'system') return systemDark() ? 'dark' : 'light';
+    return mode;
+  }
+
   function currentTheme() {
-    var stored = localStorage.getItem(THEME_KEY);
-    if (stored) return stored;
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    return resolveMode(readPref().mode);
   }
-  function syncThemeIcon() {
-    var dark = currentTheme() === 'dark';
-    var btn = $('#btnTheme');
-    btn.textContent = '';
-    btn.appendChild(el('i', { class: 'fas fa-' + (dark ? 'sun' : 'moon') }));
+
+  // applyTheme 兼容旧签名：传 'light' / 'dark' 只改明暗，传空则重新读存储
+  function applyTheme(mode) {
+    var pref = readPref();
+    if (mode === 'light' || mode === 'dark' || mode === 'system') pref.mode = mode;
+    var root = document.documentElement;
+    root.setAttribute('data-theme', pref.theme);
+    root.setAttribute('data-mode', resolveMode(pref.mode));
+    root.setAttribute('data-theme-pref', pref.mode);
   }
-  $('#btnTheme').addEventListener('click', function () {
-    var next = currentTheme() === 'dark' ? 'light' : 'dark';
-    localStorage.setItem(THEME_KEY, next);
-    applyTheme(next);
-    syncThemeIcon();
+
+  // 主题面板
+  var btnTheme = $('#btnTheme');
+  var themeMenu = $('#themeMenu');
+  var themeList = $('#themeList');
+  var themeModeBtns = $all('.theme-modes button', themeMenu);
+  var themeMenuOpen = false;
+  var themeFocus = -1;
+  var themeWrap = themeMenu.parentNode;
+
+  function themeItems() { return $all('.theme-item', themeList); }
+
+  function setThemeFocus(index) {
+    var items = themeItems();
+    if (!items.length) return;
+    themeFocus = (index + items.length) % items.length;
+    items[themeFocus].focus();
+  }
+
+  function syncThemeUI() {
+    var pref = readPref();
+    themeModeBtns.forEach(function (b) {
+      b.setAttribute('aria-pressed', b.dataset.mode === pref.mode ? 'true' : 'false');
+    });
+    themeItems().forEach(function (it) {
+      var on = it.dataset.theme === pref.theme;
+      it.setAttribute('aria-selected', on ? 'true' : 'false');
+      it.tabIndex = on ? 0 : -1;
+      var check = $('.theme-check', it);
+      if (check) check.style.visibility = on ? 'visible' : 'hidden';
+    });
+    btnTheme.setAttribute('title', '外观主题');
+  }
+
+  function chooseTheme(id) {
+    var pref = readPref();
+    pref.theme = themeId(id);
+    savePref(pref);
+    applyTheme();
+    syncThemeUI();
+  }
+
+  function chooseMode(mode) {
+    var pref = readPref();
+    pref.mode = normalizeMode(mode);
+    savePref(pref);
+    applyTheme();
+    syncThemeUI();
+  }
+
+  function buildThemeMenu() {
+    THEMES.forEach(function (t) {
+      var check = el('i', { class: 'fas fa-check theme-check' });
+      var dot = el('span', { class: 'theme-dot' });
+      dot.style.background = 'linear-gradient(135deg, ' + t.dot + ' 0 50%, ' + t.dotBg + ' 50% 100%)';
+      var item = el('li', {}, [
+        el('button', {
+          class: 'theme-item',
+          type: 'button',
+          role: 'option',
+          'data-theme': t.id,
+          'aria-selected': 'false',
+          title: '切换到「' + t.name + '」主题',
+          onclick: function () { chooseTheme(t.id); }
+        }, [
+          dot,
+          el('span', { class: 'theme-name', text: t.name }),
+          el('span', { class: 'theme-hint', text: t.hint }),
+          check
+        ])
+      ]);
+      themeList.appendChild(item);
+    });
+
+    themeModeBtns.forEach(function (b) {
+      b.addEventListener('click', function () { chooseMode(b.dataset.mode); });
+    });
+
+    // 列表内键盘：↑↓ 移动，Home/End 两端，回车/空格直接选中
+    themeList.addEventListener('keydown', function (e) {
+      var items = themeItems();
+      var idx = items.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); setThemeFocus(idx < 0 ? 0 : idx + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setThemeFocus(idx < 0 ? items.length - 1 : idx - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); setThemeFocus(0); }
+      else if (e.key === 'End') { e.preventDefault(); setThemeFocus(items.length - 1); }
+      else if (e.key === 'Enter' || e.key === ' ') {
+        if (idx >= 0) { e.preventDefault(); chooseTheme(items[idx].dataset.theme); }
+      }
+    });
+  }
+
+  function openThemeMenu() {
+    if (themeMenuOpen) return;
+    themeMenuOpen = true;
+    themeMenu.classList.remove('hidden');
+    btnTheme.setAttribute('aria-expanded', 'true');
+    syncThemeUI();
+    // 把焦点放到当前主题上，键盘用户可以直接上下选择
+    var pref = readPref();
+    var items = themeItems();
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].dataset.theme === pref.theme) { setThemeFocus(i); break; }
+    }
+    if (themeFocus < 0 && items.length) setThemeFocus(0);
+  }
+
+  function closeThemeMenu(refocus) {
+    if (!themeMenuOpen) return;
+    themeMenuOpen = false;
+    themeMenu.classList.add('hidden');
+    btnTheme.setAttribute('aria-expanded', 'false');
+    themeFocus = -1;
+    if (refocus) btnTheme.focus();
+  }
+
+  btnTheme.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (themeMenuOpen) closeThemeMenu(true); else openThemeMenu();
   });
-  applyTheme(localStorage.getItem(THEME_KEY));
-  syncThemeIcon();
+
+  // 点击面板外部关闭
+  document.addEventListener('click', function (e) {
+    if (!themeMenuOpen) return;
+    if (themeWrap.contains(e.target)) return;
+    closeThemeMenu(false);
+  });
+
+  // Esc 关闭；面板打开时上下键交给面板自己处理
+  document.addEventListener('keydown', function (e) {
+    if (!themeMenuOpen) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeThemeMenu(true);
+    }
+  }, true);
+
+  // 跟随系统：系统外观变化时实时同步（只在 mode=system 时生效）
+  if (window.matchMedia) {
+    var mqDark = window.matchMedia('(prefers-color-scheme: dark)');
+    var onSchemeChange = function () {
+      if (readPref().mode === 'system') applyTheme();
+    };
+    if (mqDark.addEventListener) mqDark.addEventListener('change', onSchemeChange);
+    else if (mqDark.addListener) mqDark.addListener(onSchemeChange);
+  }
+
+  buildThemeMenu();
+  applyTheme();
+  syncThemeUI();
 
   // ---------- 列表：搜索 / 排序 / 选择 ----------
 

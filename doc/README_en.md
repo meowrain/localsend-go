@@ -127,7 +127,18 @@ The terminal prints a QR code; open the page from any device on your LAN. The pa
 - **Send to device**: lists discovered LocalSend peers and sends files, directories or a text
   snippet with live progress and cancel.
 - **Share**: QR code + link for the current page, and a transfer history panel.
-- Dark mode, mobile layout, and no CDN dependency (fully offline).
+- **Themes**: six color themes (Indigo, Forest, Ember, Tide, Rose, Synth), each with a light
+  and a dark version plus a follow-system option; mobile layout; no CDN dependency (fully offline).
+
+#### Appearance themes
+
+Click the palette button in the top bar to open the theme panel: pick light / dark / follow
+system at the top, then a theme below. The choice takes effect immediately and is stored in
+`localStorage` under `localsendgo-theme` (format `theme:mode`, e.g. `forest:dark`). The value is
+applied by a small inline script in `<head>` before the first paint, so refreshing never flashes
+the default theme. Older values (`light` / `dark`) are migrated on read to "default theme + that
+mode", so existing users keep their appearance. The panel closes on outside click or `Esc`, and
+supports `↑` / `↓` + `Enter`.
 
 Configuration (`config.yaml`):
 

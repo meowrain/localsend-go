@@ -19,6 +19,7 @@ import (
 
 	"github.com/meowrain/localsend-go/internal/config"
 	"github.com/meowrain/localsend-go/internal/models"
+	"github.com/meowrain/localsend-go/static"
 )
 
 // webTestServer 起一个带 Web 路由的测试服务（未启用 PIN）。
@@ -29,6 +30,8 @@ func webTestServer(t *testing.T) *httptest.Server {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", WebAuth(IndexFileHandler))
+	// 静态资源与生产路由一致：/static/ 前缀剥离后从内嵌文件系统取
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.EmbeddedStaticFiles))))
 	mux.HandleFunc("/uploads/", WebAuth(FileServerHandler))
 	mux.HandleFunc("/api/web/files", WebAuth(WebListFiles))
 	mux.HandleFunc("/api/web/download", WebAuth(WebDownload))
@@ -876,13 +879,53 @@ func TestWebPageHasViewer(t *testing.T) {
 		`data-v="fullscreen"`,
 		`/static/js/web.js`,
 		`/static/css/web.css`,
+		// 外观主题：按钮 + 面板骨架 + 首屏防闪白内联脚本
+		`id="btnTheme"`,
+		`id="themeMenu"`,
+		`id="themeList"`,
+		`data-mode="system"`,
+		`localsendgo-theme`,
+		`setAttribute('data-mode'`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("page is missing %s", want)
 		}
 	}
 	// 页面不应再依赖外部 CDN（离线可用）
-	if strings.Contains(html, "unpkg.com") || strings.Contains(html, "fonts.googleapis.com") {
-		t.Errorf("page still references a CDN")
+	for _, bad := range []string{"unpkg.com", "fonts.googleapis.com", "cdn.jsdelivr.net"} {
+		if strings.Contains(html, bad) {
+			t.Errorf("page still references a CDN: %s", bad)
+		}
+	}
+}
+
+// TestWebThemesCSS 验证多套主题的令牌都在样式表里，且每套都有浅色与深色两版。
+func TestWebThemesCSS(t *testing.T) {
+	isolation(t, "")
+	srv := webTestServer(t)
+	resp, out := webGet(t, srv.URL+"/static/css/web.css")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("css = %d", resp.StatusCode)
+	}
+	css := string(out)
+	for _, theme := range []string{"indigo", "forest", "ember", "tide", "rose", "synth"} {
+		for _, mode := range []string{"light", "dark"} {
+			sel := `[data-theme="` + theme + `"][data-mode="` + mode + `"]`
+			if !strings.Contains(css, sel) {
+				t.Errorf("css is missing theme block %s", sel)
+			}
+		}
+	}
+	// 旧的 data-theme="dark" 单段式选择器已不再使用
+	if strings.Contains(css, `:root[data-theme="dark"]`) {
+		t.Errorf(`css still uses the legacy single-axis data-theme="dark" selector`)
+	}
+	// 明暗由 JS 解析后写到 data-mode，样式表里不再需要明暗媒体查询
+	if strings.Contains(css, "@media (prefers-color-scheme") {
+		t.Errorf("css still branches on prefers-color-scheme; resolved mode should be in data-mode")
+	}
+	// 每套主题都必须覆盖按钮前景色，避免主色变浅后白字失读
+	if n := strings.Count(css, "--on-primary:"); n < 13 {
+		t.Errorf("--on-primary defined %d times, want >= 13 (root + 6 themes x 2 modes)", n)
 	}
 }

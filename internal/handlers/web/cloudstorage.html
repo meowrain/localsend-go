@@ -7,6 +7,39 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📤</text></svg>">
   <link rel="stylesheet" href="/static/css/web.css">
   <link rel="stylesheet" href="/static/fontawesome/css/all.min.css">
+  <script>
+    /* 首屏前置：在样式表应用前就把主题写到 <html>，避免刷新时闪一下默认主题。
+     * 这里刻意保持极简，与 web.js 里的 THEMES 保持一致；解析失败时静默回落到默认主题。 */
+    (function () {
+      var THEMES = ['indigo', 'forest', 'ember', 'tide', 'rose', 'synth'];
+      var KEY = 'localsendgo-theme';
+      var root = document.documentElement;
+      function pick(list, v, fallback) {
+        for (var i = 0; i < list.length; i++) if (list[i] === v) return v;
+        return fallback;
+      }
+      var name = 'indigo', mode = 'system', raw = null;
+      try { raw = localStorage.getItem(KEY); } catch (e) { raw = null; }
+      if (raw) {
+        /* 老版本只存 'light' / 'dark'，直接迁移成「默认主题 + 对应明暗」 */
+        if (raw === 'light' || raw === 'dark') {
+          mode = raw;
+        } else {
+          var i = raw.indexOf(':');
+          if (i > 0) {
+            name = pick(THEMES, raw.slice(0, i), 'indigo');
+            mode = pick(['light', 'dark', 'system'], raw.slice(i + 1), 'system');
+          }
+        }
+      }
+      var resolved = mode === 'system'
+        ? (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : mode;
+      root.setAttribute('data-theme', name);
+      root.setAttribute('data-mode', resolved);
+      root.setAttribute('data-theme-pref', mode);
+    })();
+  </script>
 </head>
 <body>
 <div class="shell">
@@ -24,9 +57,25 @@
     <button class="icon-btn" id="btnSendPanel" title="发送到其它设备" aria-label="发送到其它设备">
       <i class="fas fa-share-nodes"></i>
     </button>
-    <button class="icon-btn" id="btnTheme" title="切换深色模式" aria-label="切换深色模式">
-      <i class="fas fa-moon"></i>
-    </button>
+    <div class="theme-wrap">
+      <button class="icon-btn" id="btnTheme" title="外观主题" aria-label="外观主题"
+              aria-haspopup="true" aria-expanded="false" aria-controls="themeMenu">
+        <i class="fas fa-palette"></i>
+      </button>
+
+      <!-- 主题选择面板：由 web.js 填充列表，默认隐藏 -->
+      <div class="theme-menu hidden" id="themeMenu" role="dialog" aria-label="外观主题">
+        <h4>明暗</h4>
+        <div class="theme-modes" role="group" aria-label="明暗模式">
+          <button type="button" data-mode="light" aria-pressed="false"><i class="fas fa-sun"></i>浅色</button>
+          <button type="button" data-mode="dark" aria-pressed="false"><i class="fas fa-moon"></i>深色</button>
+          <button type="button" data-mode="system" aria-pressed="false"><i class="fas fa-desktop"></i>系统</button>
+        </div>
+        <h4 id="themeListLabel">主题</h4>
+        <ul class="theme-list" id="themeList" role="listbox" aria-labelledby="themeListLabel" tabindex="0"></ul>
+        <div class="theme-foot"><i class="fas fa-lightbulb"></i> 选择会立即生效并记住</div>
+      </div>
+    </div>
     <button class="icon-btn" id="btnRefresh" title="刷新列表" aria-label="刷新列表">
       <i class="fas fa-rotate"></i>
     </button>
