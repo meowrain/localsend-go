@@ -77,6 +77,37 @@ func TestWebThumbScalesImage(t *testing.T) {
 	}
 }
 
+// TestWebThumbSupportsViewSizes 验证大图标视图能请求更大的白名单尺寸，
+// 同时越界尺寸会安全回落到默认 96px。
+func TestWebThumbSupportsViewSizes(t *testing.T) {
+	isolation(t, "")
+	thumbCacheRoot = t.TempDir()
+	t.Cleanup(func() { thumbCacheRoot = "" })
+	srv := webTestServer(t)
+
+	writeTestPNG(t, "pics/square.png", 640, 640)
+	resp, out := webGet(t, srv.URL+"/api/web/thumb?path=pics/square.png&size=320")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("thumb status = %d, body = %s", resp.StatusCode, out)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("decode thumb: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != 320 || b.Dy() != 320 {
+		t.Errorf("thumb size = %dx%d, want 320x320", b.Dx(), b.Dy())
+	}
+
+	_, out = webGet(t, srv.URL+"/api/web/thumb?path=pics/square.png&size=999")
+	img, err = png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("decode fallback thumb: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != thumbLongSide || b.Dy() != thumbLongSide {
+		t.Errorf("fallback size = %dx%d, want %dx%d", b.Dx(), b.Dy(), thumbLongSide, thumbLongSide)
+	}
+}
+
 // TestWebThumbRejectsNonImage 验证非图片与危险类型不会被当成缩略图处理。
 func TestWebThumbRejectsNonImage(t *testing.T) {
 	isolation(t, "")

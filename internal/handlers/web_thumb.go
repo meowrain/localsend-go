@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -30,8 +31,11 @@ import (
 // （webp / svg / avif…）返回 302 指向预览接口，让浏览器自己缩小原图。
 // 生成结果按「路径 + 大小 + 修改时间」缓存在用户缓存目录，避免重复解码。
 
-// thumbLongSide 是缩略图长边像素：列表里按 40 CSS px 显示，留出 2x 屏的余量。
+// thumbLongSide 是默认缩略图长边像素：详细列表按 40 CSS px 显示，留出 2x 屏的余量。
 const thumbLongSide = 96
+
+// thumbSizes 白名单列出视图模式实际需要的长边，避免任意参数造成缓存膨胀。
+var thumbSizes = map[int]bool{80: true, 96: true, 168: true, 224: true, 320: true}
 
 // maxThumbPixels 限制源图像素总数：解码一张图会占用 4 字节/像素，
 // 2400 万像素约 96 MiB，再大就退回原图，避免把服务端内存打爆。
@@ -131,17 +135,21 @@ func WebThumb(w http.ResponseWriter, r *http.Request) {
 		redirectToPreview(w, r, clean)
 		return
 	}
+	longSide := thumbLongSide
+	if value, err := strconv.Atoi(r.URL.Query().Get("size")); err == nil && thumbSizes[value] {
+		longSide = value
+	}
 
 	cachePath := ""
 	if dir := thumbCacheDir(); dir != "" {
-		cachePath = filepath.Join(dir, thumbCacheKey(clean, info))
+		cachePath = filepath.Join(dir, thumbCacheKey(clean, info, longSide))
 		if data, err := os.ReadFile(cachePath); err == nil && len(data) > 0 {
 			writeThumbPNG(w, r, data, info)
 			return
 		}
 	}
 
-	data, err := buildThumbnail(abs, info)
+	data, err := buildThumbnail(abs, info, longSide)
 	if err != nil {
 		if errors.Is(err, errThumbSkip) {
 			// 解码不了 / 图太大：让浏览器用原图当缩略图
@@ -168,14 +176,14 @@ func redirectToPreview(w http.ResponseWriter, r *http.Request, cleanRel string) 
 
 // thumbCacheKey 用「相对路径 + 大小 + 修改时间 + 目标尺寸」做缓存键，
 // 源文件一变键就变，无需额外的失效逻辑。
-func thumbCacheKey(rel string, info os.FileInfo) string {
+func thumbCacheKey(rel string, info os.FileInfo, longSide int) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%d\x00%d\x00%d", rel, info.Size(), info.ModTime().UnixNano(), thumbLongSide)
+	fmt.Fprintf(h, "%s\x00%d\x00%d\x00%d", rel, info.Size(), info.ModTime().UnixNano(), longSide)
 	return hex.EncodeToString(h.Sum(nil)[:16]) + ".png"
 }
 
 // buildThumbnail 解码源图并缩小成 PNG。
-func buildThumbnail(abs string, info os.FileInfo) ([]byte, error) {
+func buildThumbnail(abs string, info os.FileInfo, longSide int) ([]byte, error) {
 	if info.Size() > maxThumbSourceBytes {
 		return nil, errThumbSkip
 	}
@@ -208,7 +216,7 @@ func buildThumbnail(abs string, info os.FileInfo) ([]byte, error) {
 	}
 
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, scaleDownImage(src, thumbLongSide)); err != nil {
+	if err := png.Encode(&buf, scaleDownImage(src, longSide)); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

@@ -269,6 +269,7 @@
 
   var fileList = $('#fileList');
   var searchInput = $('#searchInput');
+  var viewSelect = $('#viewSelect');
   var sortSelect = $('#sortSelect');
   var selectionInfo = $('#selectionInfo');
   var btnDeleteSelected = $('#btnDeleteSelected');
@@ -354,9 +355,42 @@
   sortSelect.value = localStorage.getItem('localsendgo-sort') || 'name-asc';
   if (rows().length) { applySort(); }
 
+  // ---------- 视图 ----------
+
+  var VIEW_KEY = 'localsendgo-view';
+  var VIEW_SIZES = {
+    xlarge: 320,
+    large: 224,
+    medium: 168,
+    small: 80,
+    list: 96,
+    details: 96,
+    tiles: 96,
+    content: 96
+  };
+
+  function applyView(mode) {
+    if (!VIEW_SIZES[mode]) mode = 'details';
+    fileList.dataset.view = mode;
+    $all('.file-row', fileList).forEach(function (row) {
+      if (row.dataset.dir === '1' || (row.dataset.mime || '').indexOf('image/') !== 0) return;
+      var img = $('.file-thumb', row);
+      var url = thumbUrl(row);
+      if (img) img.src = url;
+      else applyThumb(row);
+    });
+  }
+
+  viewSelect.addEventListener('change', function () {
+    applyView(viewSelect.value);
+    localStorage.setItem(VIEW_KEY, viewSelect.value);
+  });
+
+  viewSelect.value = localStorage.getItem(VIEW_KEY) || 'details';
+
   // ---------- 缩略图 ----------
   //
-  // 服务端只解码 PNG/JPEG/GIF 并缩到长边 96px；其余图片类型后端会 302 到
+  // 服务端只解码 PNG/JPEG/GIF 并缩到请求的长边；其余图片类型后端会 302 到
   // 预览接口，由浏览器自己缩小原图。任何失败都静默回退到类型图标。
   //
   // v= 参数让图片换版本时 URL 跟着变：缩略图带 1 天 private 缓存，
@@ -364,6 +398,7 @@
 
   function thumbUrl(row) {
     var q = '?path=' + encodeURIComponent(row.dataset.path) +
+      '&size=' + encodeURIComponent(VIEW_SIZES[fileList.dataset.view] || 96) +
       '&v=' + encodeURIComponent((row.dataset.time || '') + '|' + (row.dataset.size || ''));
     return '/api/web/thumb' + q;
   }
@@ -393,6 +428,7 @@
   }
 
   $all('.file-row', fileList).forEach(applyThumb);
+  applyView(viewSelect.value);
 
   // ---------- 行操作 ----------
 
@@ -1149,6 +1185,220 @@
     if (!row || e.target !== row) return;
     e.preventDefault();
     rowAction(row);
+  });
+
+  // ---------- 鼠标矩形框选 ----------
+
+  var marqueeBox = null;
+  var marqueeStart = null;
+  var marqueeFrame = 0;
+
+  function updateMarquee(pointer) {
+    if (!marqueeBox) return;
+    var left = Math.min(marqueeStart.x, pointer.x);
+    var top = Math.min(marqueeStart.y, pointer.y);
+    var width = Math.abs(pointer.x - marqueeStart.x);
+    var height = Math.abs(pointer.y - marqueeStart.y);
+    marqueeBox.style.left = left + 'px';
+    marqueeBox.style.top = top + 'px';
+    marqueeBox.style.width = width + 'px';
+    marqueeBox.style.height = height + 'px';
+
+    var marquee = marqueeBox.getBoundingClientRect();
+    rows().forEach(function (row) {
+      var rect = row.getBoundingClientRect();
+      var hit = rect.left < marquee.right && rect.right > marquee.left &&
+        rect.top < marquee.bottom && rect.bottom > marquee.top;
+      var check = $('.check', row);
+      if (check) check.checked = hit;
+    });
+    updateSelection();
+  }
+
+  function requestMarqueeUpdate(pointer) {
+    if (marqueeFrame) return;
+    marqueeFrame = requestAnimationFrame(function () {
+      marqueeFrame = 0;
+      updateMarquee(pointer);
+    });
+  }
+
+  function stopMarquee() {
+    document.removeEventListener('pointermove', onMarqueeMove);
+    document.removeEventListener('pointerup', stopMarquee);
+    document.removeEventListener('keydown', onMarqueeKeydown);
+    if (marqueeFrame) {
+      cancelAnimationFrame(marqueeFrame);
+      marqueeFrame = 0;
+    }
+    if (marqueeBox) {
+      marqueeBox.remove();
+      marqueeBox = null;
+    }
+    marqueeStart = null;
+    document.body.classList.remove('marquee-active');
+  }
+
+  function onMarqueeKeydown(e) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    rows().forEach(function (row) {
+      var check = $('.check', row);
+      if (check) check.checked = false;
+    });
+    updateSelection();
+    stopMarquee();
+  }
+
+  function onMarqueeMove(e) {
+    if (e.clientY < 32) window.scrollBy(0, -14);
+    else if (e.clientY > window.innerHeight - 32) window.scrollBy(0, 14);
+    requestMarqueeUpdate({ x: e.clientX, y: e.clientY });
+  }
+
+  fileList.addEventListener('pointerdown', function (e) {
+    // 只在空白处开始框选；文件本体、复选框和操作按钮保持原行为。
+    if (e.pointerType !== 'mouse' || e.button !== 0 || e.target !== fileList) return;
+    e.preventDefault();
+
+    rows().forEach(function (row) {
+      var check = $('.check', row);
+      if (check) check.checked = false;
+    });
+    updateSelection();
+
+    marqueeStart = { x: e.clientX, y: e.clientY };
+    marqueeBox = el('div', { class: 'selection-box', 'aria-hidden': 'true' });
+    document.body.appendChild(marqueeBox);
+    document.body.classList.add('marquee-active');
+    updateMarquee(marqueeStart);
+
+    document.addEventListener('pointermove', onMarqueeMove);
+    document.addEventListener('pointerup', stopMarquee);
+    document.addEventListener('keydown', onMarqueeKeydown);
+  });
+
+  // ---------- 右键菜单 ----------
+
+  var contextMenu = null;
+
+  function hideContextMenu() {
+    if (!contextMenu) return;
+    contextMenu.remove();
+    contextMenu = null;
+    document.removeEventListener('pointerdown', onContextMenuOutside, true);
+    document.removeEventListener('click', onContextMenuOutside, true);
+    document.removeEventListener('scroll', hideContextMenu, true);
+    window.removeEventListener('resize', hideContextMenu);
+    window.removeEventListener('blur', hideContextMenu);
+  }
+
+  function onContextMenuOutside(e) {
+    if (contextMenu && !contextMenu.contains(e.target)) hideContextMenu();
+  }
+
+  function contextItem(options) {
+    if (options.separator) return el('div', { class: 'context-menu-sep', role: 'separator' });
+    var item = el('button', {
+      type: 'button',
+      class: 'context-menu-item' + (options.danger ? ' danger' : ''),
+      role: 'menuitem'
+    }, [
+      el('i', { class: 'fas ' + options.icon, 'aria-hidden': 'true' }),
+      el('span', { class: 'context-menu-label', text: options.label })
+    ]);
+    item.addEventListener('click', function () {
+      hideContextMenu();
+      options.action();
+    });
+    return item;
+  }
+
+  function showContextMenu(items, x, y) {
+    hideContextMenu();
+    contextMenu = el('div', { class: 'context-menu', role: 'menu' }, items.map(contextItem));
+    document.body.appendChild(contextMenu);
+
+    var rect = contextMenu.getBoundingClientRect();
+    contextMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8)) + 'px';
+    contextMenu.style.top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8)) + 'px';
+
+    document.addEventListener('pointerdown', onContextMenuOutside, true);
+    document.addEventListener('click', onContextMenuOutside, true);
+    document.addEventListener('scroll', hideContextMenu, true);
+    window.addEventListener('resize', hideContextMenu);
+    window.addEventListener('blur', hideContextMenu);
+  }
+
+  function singleFileMenu(row) {
+    var path = row.dataset.path;
+    var isDir = row.dataset.dir === '1';
+    var items = [];
+    if (isDir) {
+      items.push({ label: '打开', icon: 'fa-arrow-right', action: function () {
+        location.href = '/' + encodePath(path) + '/';
+      } });
+    } else {
+      items.push({ label: '预览', icon: 'fa-eye', action: function () { previewFile(path); } });
+      items.push({ label: '下载', icon: 'fa-download', action: function () { downloadFile(path); } });
+    }
+    items.push({ separator: true });
+    items.push({ label: '重命名', icon: 'fa-pen', action: function () { renameEntry(path, row.dataset.name); } });
+    items.push({ label: '复制链接', icon: 'fa-link', action: function () { copyLink(path); } });
+    items.push({ label: '发送到设备', icon: 'fa-share-nodes', action: function () { shareOrSend(path); } });
+    items.push({ separator: true });
+    items.push({ label: '删除', icon: 'fa-trash', danger: true, action: function () { deletePaths([path]); } });
+    return items;
+  }
+
+  function selectedPathsMenu() {
+    var paths = selected().map(function (row) { return row.dataset.path; });
+    return [
+      { label: '下载 ' + paths.length + ' 项', icon: 'fa-download', action: function () { downloadPaths(paths); } },
+      { label: '发送 ' + paths.length + ' 项', icon: 'fa-share-nodes', action: function () { openSendPanel(paths); } },
+      { separator: true },
+      { label: '删除 ' + paths.length + ' 项', icon: 'fa-trash', danger: true, action: function () { deletePaths(paths); } }
+    ];
+  }
+
+  fileList.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
+    var row = e.target.closest('.file-row');
+    var selectedRows = selected();
+
+    if (row) {
+      if (selectedRows.length > 1 && selectedRows.indexOf(row) !== -1) {
+        showContextMenu(selectedPathsMenu(), e.clientX, e.clientY);
+        return;
+      }
+      if (row.dataset.action !== 'up') {
+        rows().forEach(function (item) {
+          var check = $('.check', item);
+          if (check) check.checked = item === row;
+        });
+        updateSelection();
+      }
+      showContextMenu(singleFileMenu(row), e.clientX, e.clientY);
+      return;
+    }
+
+    var items = [
+      { label: '刷新', icon: 'fa-rotate-right', action: function () { refreshList(); } },
+      { separator: true },
+      { label: '上传文件', icon: 'fa-file-arrow-up', action: function () { fileInput.click(); } },
+      { label: '上传文件夹', icon: 'fa-folder-open', action: function () { folderInput.click(); } },
+      { separator: true },
+      { label: '新建文件夹', icon: 'fa-folder-plus', action: newFolder }
+    ];
+    if (selectedRows.length) {
+      items.unshift({ separator: true });
+      items.unshift({ label: '清除选择', icon: 'fa-xmark', action: function () {
+        selectedRows.forEach(function (item) { $('.check', item).checked = false; });
+        updateSelection();
+      } });
+      items.unshift.apply(items, selectedPathsMenu());
+    }
+    showContextMenu(items, e.clientX, e.clientY);
   });
 
   $all('.file-row', fileList).forEach(function (r) {

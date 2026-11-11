@@ -91,6 +91,19 @@
     <div class="toolbar">
       <input class="search" id="searchInput" type="search" placeholder="搜索当前目录…"
              aria-label="搜索当前目录">
+      <label class="view-field" title="视图">
+        <i class="fas fa-table-cells-large" aria-hidden="true"></i>
+        <select id="viewSelect" aria-label="视图">
+          <option value="xlarge">超大图标</option>
+          <option value="large">大图标</option>
+          <option value="medium">中图标</option>
+          <option value="small">小图标</option>
+          <option value="list">列表</option>
+          <option value="details">详细信息</option>
+          <option value="tiles">平铺</option>
+          <option value="content">内容</option>
+        </select>
+      </label>
       <select id="sortSelect" aria-label="排序方式" title="排序方式">
         <option value="name-asc">名称 ↑</option>
         <option value="name-desc">名称 ↓</option>
