@@ -12,7 +12,7 @@ depends=('glibc')
 makedepends=('go')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('03ad0ae0fec719ec6425023338c8f4017f78237940c868435f8601addb9e99cd')
+sha256sums=('6d3d2ac122afc47cad54244089108a8f616fd21aa3b0f6da92dbdac29864a265')
 
 build() {
   cd "$pkgname-$pkgver"
