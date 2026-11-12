@@ -174,6 +174,8 @@ $:
           options:
             title: localsend-go $CNB_BRANCH
             descriptionFromFile: LATEST_CHANGELOG.md
+            # 不标记 latest 的话，CNB 的「最新版本」接口与页面都会为空
+            latest: true
         - <<: *only-release-tag
           name: 上传发布附件
           image: cnbcool/attachments:latest
