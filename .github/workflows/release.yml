@@ -4,28 +4,51 @@ on:
   push:
     tags:
       - "v*"
+  # 允许在 Actions 页面手动重跑，便于补发失败的 Release
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布/重发的 Tag（例如 v1.3.0）"
+        required: true
+        type: string
+
+permissions:
+  # 创建 Release 与上传附件都需要写权限；默认 GITHUB_TOKEN 往往是只读
+  contents: write
 
 jobs:
-  create-release:
+  resolve:
+    name: resolve tag
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      tag: ${{ steps.resolve.outputs.tag }}
     steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+      - name: Resolve and validate tag
+        id: resolve
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+          # 手动触发时把用户输入先落到环境变量，避免直接插值进脚本
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+          # 只接受 v1.2.3 这类合法 Tag，防止把任意 ref 传进 checkout
+          if ! printf '%s' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+            echo "非法 Tag：$TAG（应形如 v1.3.0）" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: create-release
+    name: build ${{ matrix.platform }}
+    needs: resolve
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         platform:
           [
@@ -38,44 +61,95 @@ jobs:
           ]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          # 构建的是指定 Tag 的代码（已通过 resolve 校验），而不是当前分支
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.22
+          go-version-file: go.mod
+          cache: true
 
       - name: Get OS and ARCH
         id: platform
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          echo "GOOS=$(echo ${{ matrix.platform }} | cut -d '/' -f1)" >> $GITHUB_OUTPUT
-          echo "GOARCH=$(echo ${{ matrix.platform }} | cut -d '/' -f2)" >> $GITHUB_OUTPUT
-          FORMATTED_PLATFORM=$(echo "${{ matrix.platform }}" | sed 's/\//-/g')
-          echo "FORMATTED_PLATFORM=$FORMATTED_PLATFORM" >> $GITHUB_OUTPUT
-          if [[ "${{ matrix.platform }}" == *"windows"* ]]; then
-            echo "EXT=.exe" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          GOOS="${PLATFORM%%/*}"
+          GOARCH="${PLATFORM##*/}"
+          {
+            echo "GOOS=$GOOS"
+            echo "GOARCH=$GOARCH"
+            echo "FORMATTED_PLATFORM=$GOOS-$GOARCH"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$GOOS" = "windows" ]; then
+            echo "EXT=.exe" >> "$GITHUB_OUTPUT"
           else
-            echo "EXT=" >> $GITHUB_OUTPUT
+            echo "EXT=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build
         env:
           GOOS: ${{ steps.platform.outputs.GOOS }}
           GOARCH: ${{ steps.platform.outputs.GOARCH }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.resolve.outputs.tag }}
         run: |
+          set -euo pipefail
           mkdir -p ./artifacts
-          VERSION="${GITHUB_REF_NAME}"
           COMMIT="$(git rev-parse --short HEAD)"
+          OUT="./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}"
           go build \
-            -ldflags "-X github.com/meowrain/localsend-go/internal/version.Version=${VERSION} -X github.com/meowrain/localsend-go/internal/version.Commit=${COMMIT}" \
-            -o "./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}" .
+            -trimpath \
+            -ldflags "-s -w \
+              -X github.com/meowrain/localsend-go/internal/version.Version=${VERSION} \
+              -X github.com/meowrain/localsend-go/internal/version.Commit=${COMMIT}" \
+            -o "$OUT" \
+            .
+          # 冒烟检查：产物能在当前 runner 执行时才验证（linux/amd64），
+          # 确认 -X 注入生效，避免发出 --version 显示 dev 的包
+          if [ "$GOOS" = "linux" ] && [ "$GOARCH" = "amd64" ]; then
+            "$OUT" --version
+            "$OUT" --version | grep -q "$VERSION"
+          fi
 
-      - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
-          asset_name: localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
-          asset_content_type: application/octet-stream
+          name: localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}
+          path: artifacts/localsend-go-${{ steps.platform.outputs.FORMATTED_PLATFORM }}${{ steps.platform.outputs.EXT }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: publish release
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          ls -lh
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: Release ${{ needs.resolve.outputs.tag }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/localsend-go-*
+            artifacts/SHA256SUMS.txt
