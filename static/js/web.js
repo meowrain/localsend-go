@@ -2111,6 +2111,8 @@
 
   function openSendPanel(paths) {
     sendSelectedPaths = paths || [];
+    var refreshTimer;
+    var isLoading = false;
     var body = el('div');
     var devicesBox = el('div', { class: 'device-list' });
     body.appendChild(el('p', {
@@ -2121,14 +2123,21 @@
     }));
     body.appendChild(devicesBox);
 
-    var refreshBtn = el('button', { class: 'btn sm', style: 'margin-top:12px' }, [
+    var refreshBtn = el('button', { class: 'btn sm device-refresh', style: 'margin-top:12px' }, [
       el('i', { class: 'fas fa-rotate' }), document.createTextNode(' 重新扫描')
     ]);
     body.appendChild(refreshBtn);
 
     function loadDevices() {
-      devicesBox.textContent = '';
-      devicesBox.appendChild(el('div', { class: 'empty', style: 'padding:20px', text: '正在扫描局域网设备…' }));
+      if (isLoading) return;
+      isLoading = true;
+      refreshBtn.classList.add('scanning');
+      refreshBtn.disabled = true;
+      var hasDevices = devicesBox.querySelector('.device') !== null;
+      if (!hasDevices) {
+        devicesBox.textContent = '';
+        devicesBox.appendChild(el('div', { class: 'empty', style: 'padding:20px', text: '正在扫描局域网设备…' }));
+      }
       fetch('/api/web/devices', { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -2157,8 +2166,15 @@
           });
         })
         .catch(function () {
-          devicesBox.textContent = '';
-          devicesBox.appendChild(el('div', { class: 'empty', style: 'padding:20px', text: '扫描设备失败' }));
+          if (!hasDevices) {
+            devicesBox.textContent = '';
+            devicesBox.appendChild(el('div', { class: 'empty', style: 'padding:20px', text: '扫描设备失败' }));
+          }
+        })
+        .finally(function () {
+          isLoading = false;
+          refreshBtn.classList.remove('scanning');
+          refreshBtn.disabled = false;
         });
     }
 
@@ -2167,11 +2183,15 @@
     openModal({
       title: '发送到设备',
       body: body,
-      onClose: function () { sendPanelOpen = false; },
+      onClose: function () {
+        clearInterval(refreshTimer);
+        sendPanelOpen = false;
+      },
       buttons: [{ label: '关闭' }]
     });
     sendPanelOpen = true;
     loadDevices();
+    refreshTimer = setInterval(loadDevices, 2000);
   }
 
   function startSend(device) {

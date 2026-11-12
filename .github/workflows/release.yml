@@ -140,7 +140,8 @@ jobs:
         run: |
           set -euo pipefail
           ls -lh
-          sha256sum ./* > SHA256SUMS.txt
+          # 用 * 而非 ./*，避免校验文件里出现 ./ 前缀
+          sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Publish release

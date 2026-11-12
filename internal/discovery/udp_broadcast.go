@@ -54,6 +54,10 @@ func ListenForUDPBroadcasts(updates chan<- []models.SendModel) {
 			logger.Errorf("Invalid broadcast message from %s: missing alias", remoteAddr.IP.String())
 			continue
 		}
+		if message.Fingerprint != "" && message.Fingerprint == shared.Message.Fingerprint {
+			logger.Debugf("Skip self discovered via UDP from %s", remoteAddr.IP.String())
+			continue
+		}
 		// 协议 7.1：未知/缺失的设备类型回退 desktop，与官方实现一致。
 		message.DeviceType = normalizeDeviceType(message.DeviceType)
 
